@@ -17,7 +17,9 @@ fits i (Bucket _ _ bmin bmax _) = bmin <= i && i < bmax
 split :: Integral a => RoutingTable a v -> RoutingTable a v
 split (Bucket bid bsize bmin bmax bmap) =
     Split (Bucket bid bsize bmin mid less) (Bucket bid bsize mid bmax more)
-    where mid = fromInteger $ (toInteger bmin + toInteger bmax) `quot` 2
+    where mid = if bmin < bmax then
+                    bmin + ((bmax - bmin) `quot` 2)
+                    else bmax + ((bmin - bmax) `quot` 2)
           (less, more) = Map.partitionWithKey (\k _ -> bmin <= k && k < mid) bmap
 split rt = rt
 
