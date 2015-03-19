@@ -1,18 +1,21 @@
+{-# LANGUAGE NamedFieldPuns #-}
+
 module Bucket where
 
 import qualified Data.Map as Map
 
---                             +---------ID
---                             | +-------Bucket Size
---                             | |   +---Min Value
---                             | |   | +-Max value
---                             | |   | |
-data RoutingTable a v = Bucket a Int a a (Map.Map a v)
+data RoutingTable a v = Bucket
+    { bucketId   :: a
+    , bucketSize :: Int
+    , minVal     :: a
+    , maxVal     :: a
+    , bucketData :: Map.Map a v
+    }
     | Split (RoutingTable a v) (RoutingTable a v)
 
 fits :: Ord a => a -> RoutingTable a v -> Bool
 fits i (Split a b) = fits i a || fits i b
-fits i (Bucket _ _ bmin bmax _) = bmin <= i && i < bmax
+fits i (Bucket { minVal, maxVal }) = minVal <= i && i < maxVal
 
 split :: Integral a => RoutingTable a v -> RoutingTable a v
 split (Bucket bid bsize bmin bmax bmap) =
@@ -28,9 +31,12 @@ insert key value (Split a b)
     | fits key a = insert key value a
     | otherwise = insert key value b
 
-insert key value (Bucket bid bsize bmin bmax bmap)
-    | bmin <= key && key < bmax && Map.size bmap < bsize =
-        Bucket bid bsize bmin bmax (Map.insert key value bmap)
-    | bmin <= key && key < bmax && fits bid bucket = split $ Bucket bid bsize bmin bmax (Map.insert key value bmap)
+insert key value bucket
+    | bmin <= key && key < bmax && Map.size bmap < bucketSize bucket
+        = bucket { bucketData = Map.insert key value bmap }
+    | bmin <= key && key < bmax && fits (bucketId bucket) bucket
+        = insert key value $ split bucket
     | otherwise = bucket
-        where bucket = Bucket bid bsize bmin bmax bmap
+        where bmin = minVal bucket
+              bmax = maxVal bucket
+              bmap = bucketData bucket
