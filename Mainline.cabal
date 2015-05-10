@@ -27,6 +27,8 @@ test-suite Main
   x-uses-tf:       true
   build-depends:   
                    base >= 4.7 && < 5,
+                   bencoding,
+                   bytestring,
                    containers,
                    HUnit >= 1.2 && < 2,
                    QuickCheck >= 2.4,
