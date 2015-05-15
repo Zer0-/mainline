@@ -25,11 +25,11 @@ data Message
     | Response NodeID Message
     | Ping
     | FindNode NodeID
-    | NodeFound (Either NodeInfo [NodeInfo])
+--  | Nodes (Either NodeInfo [NodeInfo])
+    | Nodes [NodeInfo]
     | AskPeers InfoHash
     | PeersFound Token Message
     | Values [CompactInfo]
-    | Nodes [NodeInfo]
     | AnnouncePeer Port Token Bool -- last arg is implied_port
     | Error { errCode :: Integer, errMsg :: String }
 
@@ -52,7 +52,16 @@ msgToBDictMap (Query i m) = bd "y" "q"
     `union` singleton (pack "a")
            (BDict (singleton (pack "id") (toBEncode i) `union` msgToBDictMap m))
 
+msgToBDictMap (Response i m) = bd "y" "r"
+    `union` singleton (pack "r")
+           (BDict $ singleton (pack "id") (toBEncode i) `union` msgToBDictMap m)
+
 msgToBDictMap Ping = Nil
+
+msgToBDictMap (FindNode n) = singleton (pack "target") (toBEncode n)
+
+msgToBDictMap (Nodes (n : [])) = singleton (pack "nodes") (toBEncode n)
+msgToBDictMap (Nodes n       ) = singleton (pack "nodes") (toBEncode n)
 
 msgToBDictMap _ = undefined
 
@@ -67,5 +76,5 @@ instance BEncode KPacket where
 
     fromBEncode _ = undefined
 
-testBDict :: BValue
-testBDict = BDict $ Cons (pack "A") (BInteger 1) (Cons (pack "B") (BInteger 2) Nil)
+testKPacket :: KPacket
+testKPacket = KPacket (pack "transaction") (Query 1337 Ping)
