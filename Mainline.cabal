@@ -30,6 +30,7 @@ test-suite Main
                    bencoding,
                    bytestring,
                    containers,
+                   Crypto,
                    HUnit >= 1.2 && < 2,
                    QuickCheck >= 2.4,
                    test-framework >= 0.4.1,
