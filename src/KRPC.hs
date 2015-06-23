@@ -76,31 +76,31 @@ data Message
     | AskPeers InfoHash
     | PeersFound Token Message
     | Values [CompactInfo]
-    | AnnouncePeer Port Token Bool -- last arg is implied_port
+    | AnnouncePeer InfoHash Port Token Bool -- last arg is implied_port
     | Error { errCode :: Integer, errMsg :: String }
 
 bd :: String -> String -> BDictMap BValue
 bd a b = singleton (stringpack a) (BString $ stringpack b)
 
 msgName :: Message -> String
-msgName  Ping                = "ping"
-msgName (FindNode _        ) = "find_node"
-msgName (AskPeers _        ) = "get_peers"
-msgName (AnnouncePeer _ _ _) = "announce_peer"
-msgName _                    = undefined
+msgName  Ping                  = "ping"
+msgName (FindNode _          ) = "find_node"
+msgName (AskPeers _          ) = "get_peers"
+msgName (AnnouncePeer _ _ _ _) = "announce_peer"
+msgName _                      = undefined
 
 msgToBDictMap :: Message -> BDictMap BValue
 msgToBDictMap (Error code msg) = bd "y" "e"
     `union` singleton (stringpack "e") (BList [BInteger code, BString (stringpack msg)])
 
-msgToBDictMap (Query i m) = bd "y" "q"
+msgToBDictMap (Query queryNodeId m) = bd "y" "q"
     `union` bd "q" (msgName m)
     `union` singleton (stringpack "a")
-           (BDict (singleton (stringpack "id") (bEncode i) `union` msgToBDictMap m))
+           (BDict (singleton (stringpack "id") (bEncode queryNodeId) `union` msgToBDictMap m))
 
-msgToBDictMap (Response i m) = bd "y" "r"
+msgToBDictMap (Response respondNodeId m) = bd "y" "r"
     `union` singleton (stringpack "r")
-           (BDict $ singleton (stringpack "id") (bEncode i) `union` msgToBDictMap m)
+           (BDict $ singleton (stringpack "id") (bEncode respondNodeId) `union` msgToBDictMap m)
 
 msgToBDictMap Ping = Nil
 
@@ -110,6 +110,20 @@ msgToBDictMap (Nodes (n : [])) = singleton (stringpack "nodes") (toBEncode n)
 msgToBDictMap (Nodes n       ) = singleton (stringpack "nodes") (toBEncode n)
 
 msgToBDictMap (AskPeers i) = singleton (stringpack "info_hash") (bEncode i)
+
+msgToBDictMap (PeersFound t (Nodes n)) =
+    singleton (stringpack "token") (toBEncode t)
+    `union` singleton (stringpack "values") (toBEncode n)
+
+msgToBDictMap (PeersFound t (Values c)) =
+    singleton (stringpack "token") (toBEncode t)
+    `union` singleton (stringpack "values") (toBEncode c)
+
+msgToBDictMap (AnnouncePeer infohash port token implied_port) =
+    singleton (stringpack "info_hash") (toBEncode port)
+    `union` singleton (stringpack "implied_port") (toBEncode implied_port)
+    `union` singleton (stringpack "port") (toBEncode port)
+    `union` singleton (stringpack "token") (toBEncode token)
 
 msgToBDictMap _ = undefined
 
