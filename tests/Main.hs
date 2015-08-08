@@ -32,6 +32,6 @@ tests = [
 
 main :: IO ()
 main = do
-    --defaultMain tests
+    defaultMain tests
     putStrLn $ show $ (toBEncode testKPacket)
     putStrLn $ show $ (encode testKPacket)

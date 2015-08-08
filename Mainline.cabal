@@ -41,3 +41,14 @@ test-suite Main
   default-language: Haskell2010
   main-is:         Main.hs
 
+executable App
+  build-depends:   
+                   base >= 4.7 && < 5,
+                   bencoding,
+                   bytestring,
+                   containers,
+                   Crypto,
+                   network
+  hs-source-dirs:  src
+  ghc-options:     -Wall -rtsopts
+  main-is:         App.hs
