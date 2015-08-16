@@ -29,6 +29,9 @@ type Token = ByteString
 stringpack :: String -> ByteString
 stringpack = Char8.pack
 
+stringunpack :: ByteString -> String
+stringunpack = Char8.unpack
+
 class Octets a where
     octets :: a -> [Word8]
 
@@ -119,13 +122,31 @@ msgToBDictMap (PeersFound t (Values c)) =
     singleton (stringpack "token") (toBEncode t)
     `union` singleton (stringpack "values") (toBEncode c)
 
-msgToBDictMap (AnnouncePeer infohash port token implied_port) =
-    singleton (stringpack "info_hash") (toBEncode port)
+msgToBDictMap (AnnouncePeer infohash portnum token implied_port) =
+    singleton (stringpack "info_hash") (bEncode infohash)
     `union` singleton (stringpack "implied_port") (toBEncode implied_port)
-    `union` singleton (stringpack "port") (toBEncode port)
+    `union` singleton (stringpack "port") (toBEncode portnum)
     `union` singleton (stringpack "token") (toBEncode token)
 
 msgToBDictMap _ = undefined
+
+bs_y :: ByteString
+bs_y = stringpack "y"
+
+bs_e :: ByteString
+bs_e = stringpack "e"
+
+bDictMapToMsg :: BDictMap BValue -> Message
+bDictMapToMsg (Cons
+                chrErr
+                (BList ((BInteger code) : (BString msg) : []))
+                Nil)
+    | chrErr == bs_e = Error code (stringunpack msg)
+
+bDictMapToMsg (Cons chrMsgTypeKey (BString chrMsgTypeVal) xs)
+    | chrMsgTypeKey == bs_y && chrMsgTypeVal == bs_e = bDictMapToMsg xs
+
+bDictMapToMsg _ = undefined
 
 data KPacket = KPacket
     { transactionId :: ByteString
@@ -136,7 +157,9 @@ instance BEncode KPacket where
     toBEncode (KPacket { transactionId = t, message = m }) =
         BDict $ singleton (stringpack "t") (BString t) `union` (msgToBDictMap m)
 
-    fromBEncode _ = undefined
+    fromBEncode (BDict (Cons t (BString tid) xs))
+        | t == stringpack "t" = Right $ KPacket tid (bDictMapToMsg xs)
+    fromBEncode _ = decodingError "this doesn't look like a KRPC message"
 
 {-
 testKPacket :: KPacket
