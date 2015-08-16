@@ -19,10 +19,16 @@ data CompactInfo = CompactInfo
     , port  :: Port
     }
 
+instance Eq CompactInfo where
+    CompactInfo i p == CompactInfo i' p' = i == i' && p == p'
+
 data NodeInfo = NodeInfo
     { nodeId       :: NodeID
     , compactInfo  :: CompactInfo
     }
+
+instance Eq NodeInfo where
+    NodeInfo i c == NodeInfo i' c' = i == i' && c == c'
 
 type Token = ByteString
 
@@ -82,6 +88,25 @@ data Message
     | AnnouncePeer InfoHash Port Token Bool -- last arg is implied_port
     | Error { errCode :: Integer, errMsg :: String }
 
+instance Show Message where
+    show (Error code msg) = "Error{code: " ++ show code
+                                    ++ " msg: " ++ show msg ++ "}"
+    show _ = ""
+
+instance Eq Message where
+    Query i xs == Query i' xs' = i == i' && xs == xs'
+    Response i xs == Response i' xs' = i == i' && xs == xs'
+    Ping == Ping = True
+    FindNode a == FindNode b = a == b
+    Nodes a == Nodes b = a == b
+    AskPeers a == AskPeers b = a == b
+    PeersFound t m == PeersFound t' m' = t == t' && m == m'
+    Values a == Values b = a == b
+    AnnouncePeer i p t b == AnnouncePeer i' p' t' b'
+        = i == i' && p == p' && t == t' && b == b'
+    Error e m == Error e' m' = e == e' && m == m'
+    _ == _ = False
+
 bd :: String -> String -> BDictMap BValue
 bd a b = singleton (stringpack a) (BString $ stringpack b)
 
@@ -130,6 +155,12 @@ msgToBDictMap (AnnouncePeer infohash portnum token implied_port) =
 
 msgToBDictMap _ = undefined
 
+{-
+ - >>> sorted([b'e', b'y', b't', b'q', b'r'])
+ - [b'e', b'q', b'r', b't', b'y']
+ - e q r t y
+ -}
+
 bs_y :: ByteString
 bs_y = stringpack "y"
 
@@ -138,13 +169,10 @@ bs_e = stringpack "e"
 
 bDictMapToMsg :: BDictMap BValue -> Message
 bDictMapToMsg (Cons
-                chrErr
+                e
                 (BList ((BInteger code) : (BString msg) : []))
-                Nil)
-    | chrErr == bs_e = Error code (stringunpack msg)
-
-bDictMapToMsg (Cons chrMsgTypeKey (BString chrMsgTypeVal) xs)
-    | chrMsgTypeKey == bs_y && chrMsgTypeVal == bs_e = bDictMapToMsg xs
+                (Cons y (BString yval) Nil))
+    | e == bs_e && y == bs_y && yval == bs_e = Error code (stringunpack msg)
 
 bDictMapToMsg _ = undefined
 
@@ -153,22 +181,20 @@ data KPacket = KPacket
     , message       :: Message
     }
 
+instance Show KPacket where
+    show (KPacket t m) = "KPacket{t:" ++ show t ++ " " ++ show m ++ "}"
+
 instance BEncode KPacket where
     toBEncode (KPacket { transactionId = t, message = m }) =
         BDict $ singleton (stringpack "t") (BString t) `union` (msgToBDictMap m)
 
-    fromBEncode (BDict (Cons t (BString tid) xs))
+    fromBEncode (BDict (Cons a meat
+                            (Cons t (BString tid)
+                                (Cons y yval Nil))))
         | t == stringpack "t" = Right $ KPacket tid (bDictMapToMsg xs)
-    fromBEncode _ = decodingError "this doesn't look like a KRPC message"
+            where xs = singleton a meat `union` singleton y yval
 
-{-
-testKPacket :: KPacket
-testKPacket = KPacket (stringpack "transaction") (Query (Word160 0 0 0 0 1337) Ping)
--}
+    fromBEncode _ = decodingError "- this doesn't look like a KRPC message"
 
-testKPacket :: KPacket
-testKPacket = KPacket (stringpack "transaction2") (
-    Nodes [ NodeInfo (Word160 1 1 1 1 1337) (CompactInfo 192 8080)
-          , NodeInfo (Word160 2 2 2 2 1338) (CompactInfo 168 9999)
-          ]
-    )
+instance Eq KPacket where
+    KPacket tid msg == KPacket tid' msg' = tid == tid' && msg == msg'
