@@ -11,7 +11,7 @@ import qualified Data.Map as Map
 import Data.ByteString (pack)
 
 import Data.BEncode
-import Data.BEncode.BDict
+import Data.BEncode.BDict hiding (map)
 
 --import Debug.Trace
 
@@ -29,21 +29,73 @@ prop_size bid xs = bsize (foldr (\j b -> insert j j b) bucket (nub xs)) == len
 
 fmt_decodeErr :: [Word8] -> Integer -> String -> Bool
 fmt_decodeErr i code msg = fromBEncode bval == (Right $ KPacket tid (Error code msg))
-    where bval = BDict $
-                    (singleton (stringpack "t") (BString tid))
-                    `union` bd "y" "e"
-                    `union` (singleton (stringpack "e") (BList [BInteger code, BString (stringpack msg)]))
+    where bval = BDict $ (singleton (stringpack "t") (BString tid))
+                            `union` bd "y" "e"
+                            `union` (singleton (stringpack "e") (BList [BInteger code, BString (stringpack msg)]))
           tid = pack i
 
-fmt_decodePing :: [Word8] -> [Word8] -> Bool
-fmt_decodePing i n = fromBEncode bval == (Right $ KPacket tid (Query (parseNodeID nid) Ping))
+fmt_decodePingQuery :: [Word8] -> [Word8] -> Bool
+fmt_decodePingQuery i n = fromBEncode bval == (Right $ KPacket tid (Query (fromByteString nid) Ping))
+    where bval = BDict $ singleton bs_a (BDict (singleton bs_id (BString nid)))
+                            `union` (singleton bs_t (BString tid))
+                            `union` bd "q" "ping"
+                            `union` bd "y" "q"
+          tid = pack i
+          nid = pack n
+
+fmt_decodePingResponse :: [Word8] -> [Word8] -> Bool
+fmt_decodePingResponse i n = fromBEncode bval == (Right $ KPacket tid (Response (fromByteString nid) Ping))
+    where bval = BDict $ singleton bs_r (BDict (singleton bs_id (BString nid)))
+                            `union` (singleton bs_t (BString tid))
+                            `union` bd "y" "r"
+          tid = pack i
+          nid = pack n
+
+fmt_decodeFindNodeQuery :: [Word8] -> [Word8] -> [Word8] -> Bool
+fmt_decodeFindNodeQuery i n t = fromBEncode bval == (Right $ KPacket tid (Query (fromByteString nid) (FindNode (fromByteString target))))
     where bval = BDict $
-                    singleton bs_a (BDict (singleton bs_id (BString nid)))
+                    singleton bs_a
+                        (BDict (singleton bs_id (BString nid)
+                                    `union` singleton (stringpack "target") (BString target)))
                     `union` (singleton bs_t (BString tid))
-                    `union` bd "q" "ping"
+                    `union` bd "q" "find_node"
                     `union` bd "y" "q"
           tid = pack i
           nid = pack n
+          target = pack t
+
+fmt_decodeNodeResponse :: [Word8] -> [Word8] -> [Word8] -> Bool
+fmt_decodeNodeResponse t i n
+        = fromBEncode bval == (Right $
+                               KPacket tid $
+                                   Response
+                                       (fromByteString nid)
+                                       (Node $ fromByteString ni))
+    where tid = pack t
+          nid = pack i
+          ni = pack n
+          bval = BDict $
+            singleton bs_r (BDict $
+                singleton bs_id (BString nid)
+                `union` singleton (stringpack "nodes") (BString ni))
+            `union` bd "y" "r"
+            `union` (singleton bs_t (BString tid))
+
+fmt_decodeNodesResponse :: [Word8] -> [Word8] -> [[Word8]] -> Bool
+fmt_decodeNodesResponse t i ns
+        = fromBEncode bval == (Right $
+                               KPacket tid $
+                                   Response
+                                       (fromByteString nid)
+                                       (Nodes $ map fromOctets ns))
+    where tid = pack t
+          nid = pack i
+          bval = BDict $
+            singleton bs_r (BDict $
+                singleton bs_id (BString nid)
+                `union` singleton (stringpack "nodes") (BList (map (\x -> BString (pack x)) ns)))
+            `union` bd "y" "r"
+            `union` singleton bs_t (BString tid)
 
 tests :: [Test]
 tests = [
@@ -52,8 +104,12 @@ tests = [
             testProperty "Always store things in boundless bucket" prop_size
             ],
         testGroup "KRPC Sanity" [
-            testProperty "decode error message"                    fmt_decodeErr,
-            testProperty "decode Ping  message"                    fmt_decodePing
+            testProperty "decode Error Message"                    fmt_decodeErr,
+            testProperty "decode Ping Query Message"               fmt_decodePingQuery,
+            testProperty "decode Ping Response Message"            fmt_decodePingResponse,
+            testProperty "decode FindNode Query Message"           fmt_decodeFindNodeQuery,
+            testProperty "decode Node Response Message"            fmt_decodeNodeResponse,
+            testProperty "decode Nodes Response Message"           fmt_decodeNodesResponse
             ]
         ]
 

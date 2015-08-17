@@ -7,7 +7,7 @@ import Data.ByteString (pack, unpack, ByteString)
 import qualified Data.ByteString.Char8 as Char8
 import Data.Digest.SHA1 (Word160 (Word160))
 import Data.BEncode
-import Data.BEncode.BDict
+import Data.BEncode.BDict hiding (map)
 
 type NodeID = Word160
 
@@ -39,14 +39,21 @@ stringpack = Char8.pack
 stringunpack :: ByteString -> String
 stringunpack = Char8.unpack
 
+numFromOctets :: (Num a, Bits a) => [Word8] -> a
+numFromOctets = foldl' accum 0
+  where
+    accum a o = (a `shiftL` 8) .|. fromIntegral o
+
 class Octets a where
     octets :: a -> [Word8]
+    fromOctets :: [Word8] -> a
 
 instance Octets Word16 where
     octets w =
         [ fromIntegral (w `shiftR` 8)
         , fromIntegral w
         ]
+    fromOctets = numFromOctets
 
 instance Octets Word32 where
     octets w =
@@ -55,20 +62,29 @@ instance Octets Word32 where
         , fromIntegral (w `shiftR` 8)
         , fromIntegral w
         ]
+    fromOctets = numFromOctets
 
 instance Octets Word160 where
     octets (Word160 a1 a2 a3 a4 a5) = octets a1 ++ octets a2 ++ octets a3 ++ octets a4 ++ octets a5
 
+    fromOctets bytes = Word160 a b c d e
+        where a = fromOctets $ take 32 bytes
+              b = fromOctets $ take 32 (drop 32 bytes)
+              c = fromOctets $ take 32 (drop 64 bytes)
+              d = fromOctets $ take 32 (drop 96 bytes)
+              e = fromOctets $ take 32 (drop 128 bytes)
+
 instance Octets CompactInfo where
     octets (CompactInfo i p) = octets i ++ octets p
+
+    fromOctets bytes = CompactInfo (fromOctets $ take 32 bytes)
+                            (fromOctets $ take 16 (drop 32 bytes))
 
 instance Octets NodeInfo where
     octets (NodeInfo nId nInfo) = octets nId ++ octets nInfo
 
-fromOctets :: [Word8] -> Word32
-fromOctets = foldl' accum 0
-  where
-    accum a o = (a `shiftL` 8) .|. fromIntegral o
+    fromOctets bytes = NodeInfo (fromOctets $ take 160 bytes)
+                            (fromOctets $ drop 160 bytes)
 
 bEncode :: (Octets a) => a -> BValue
 bEncode = toBEncode . pack . octets
@@ -86,8 +102,8 @@ data Message
     | Response NodeID Message
     | Ping
     | FindNode NodeID
---  | Nodes (Either NodeInfo [NodeInfo])
     | Nodes [NodeInfo]
+    | Node NodeInfo
     | AskPeers InfoHash
     | PeersFound Token Message
     | Values [CompactInfo]
@@ -100,22 +116,26 @@ instance Show Message where
 
     show (Query nid msg) = "Query<from: " ++ show nid ++ ">{"
                                         ++ show msg ++ "}"
+    show (Response nid msg) = "Response<from: " ++ show nid ++ ">{"
+                                        ++ show msg ++ "}"
+    show (FindNode nid) = "FindNode<" ++ show nid ++ ">"
     show Ping = "Ping"
     show _ = ""
 
 instance Eq Message where
-    Query i xs == Query i' xs' = i == i' && xs == xs'
-    Response i xs == Response i' xs' = i == i' && xs == xs'
-    Ping == Ping = True
-    FindNode a == FindNode b = a == b
-    Nodes a == Nodes b = a == b
-    AskPeers a == AskPeers b = a == b
-    PeersFound t m == PeersFound t' m' = t == t' && m == m'
-    Values a == Values b = a == b
+    Query i xs           == Query i' xs'     = i == i' && xs == xs'
+    Response i xs        == Response i' xs'  = i == i' && xs == xs'
+    Ping                 == Ping             = True
+    FindNode a           == FindNode b       = a == b
+    Nodes a              == Nodes b          = a == b
+    Node a               == Node b           = a == b
+    AskPeers a           == AskPeers b       = a == b
+    PeersFound t m       == PeersFound t' m' = t == t' && m == m'
+    Values a             == Values b         = a == b
     AnnouncePeer i p t b == AnnouncePeer i' p' t' b'
         = i == i' && p == p' && t == t' && b == b'
-    Error e m == Error e' m' = e == e' && m == m'
-    _ == _ = False
+    Error e m            == Error e' m'      = e == e' && m == m'
+    _                    == _ = False
 
 bd :: String -> String -> BDictMap BValue
 bd a b = singleton (stringpack a) (BString $ stringpack b)
@@ -131,6 +151,9 @@ bs_q = stringpack "q"
 
 bs_a :: ByteString
 bs_a = stringpack "a"
+
+bs_r :: ByteString
+bs_r = stringpack "r"
 
 bs_t :: ByteString
 bs_t = stringpack "t"
@@ -162,8 +185,8 @@ msgToBDictMap Ping = Nil
 
 msgToBDictMap (FindNode i) = singleton (stringpack "target") (bEncode i)
 
-msgToBDictMap (Nodes (n : [])) = singleton (stringpack "nodes") (toBEncode n)
-msgToBDictMap (Nodes n       ) = singleton (stringpack "nodes") (toBEncode n)
+msgToBDictMap (Node   n) = singleton (stringpack "nodes") (toBEncode n)
+msgToBDictMap (Nodes ns) = singleton (stringpack "nodes") (toBEncode ns)
 
 msgToBDictMap (AskPeers i) = singleton (stringpack "info_hash") (bEncode i)
 
@@ -189,25 +212,67 @@ msgToBDictMap _ = undefined
  - a e q r t y
  -}
 
-parseNodeID :: ByteString -> NodeID
-parseNodeID bs = Word160 a b c d e
-    where bytes = unpack bs
-          a = fromOctets $ take 32 bytes
-          b = fromOctets $ take 32 (drop 32 bytes)
-          c = fromOctets $ take 32 (drop 64 bytes)
-          d = fromOctets $ take 32 (drop 96 bytes)
-          e = fromOctets $ take 32 (drop 128 bytes)
+fromByteString :: (Octets a) => ByteString -> a
+fromByteString = fromOctets . unpack
 
 bDictMapToMsg :: BDictMap BValue -> Message
+
+--Ping Query
 bDictMapToMsg (Cons a (BDict (Cons i (BString nid) Nil))
                 (Cons _ (BString qval)
-                    (Cons y (BString yval) Nil)))
-    |  y == bs_y
-    && yval == bs_q
+                    (Cons _ (BString yval) Nil)))
+    |  yval == bs_q
     && qval == stringpack "ping"
     && a == bs_a
     && i == bs_id
-    = Query (parseNodeID nid) Ping
+    = Query (fromByteString nid) Ping
+
+--Ping Response
+bDictMapToMsg (Cons r (BDict (Cons i (BString nid) Nil))
+                (Cons _ (BString yval) Nil))
+    |  yval == bs_r
+    && r == bs_r
+    && i == bs_id
+    = Response (fromByteString nid) Ping
+
+--FindNode Query
+bDictMapToMsg (Cons a (BDict (Cons i (BString nid) (Cons t (BString tval) Nil)))
+                (Cons _ (BString qval)
+                    (Cons _ (BString yval) Nil)))
+    |  yval == bs_q
+    && qval == stringpack "find_node"
+    && t == stringpack "target"
+    && a == bs_a
+    && i == bs_id
+    = Query (fromByteString nid) (FindNode (fromByteString tval))
+
+--Node Response (single node)
+bDictMapToMsg (Cons r
+                  (BDict
+                      (Cons i (BString nid)
+                      (Cons n (BString ni) Nil)))
+                  (Cons _ (BString yval) Nil))
+    |  yval == bs_r
+    && r == bs_r
+    && i == bs_id
+    && n == stringpack "nodes"
+    = Response (fromByteString nid) (Node $ fromByteString ni)
+
+--Nodes Response (list)                              different↴
+bDictMapToMsg (Cons r (BDict (Cons i (BString nid) (Cons n (BList nodes) Nil)))
+                (Cons _ (BString yval) Nil))
+    |  yval == bs_r
+    && r == bs_r
+    && i == bs_id
+    && n == stringpack "nodes"
+    && isListOfBS nodes
+    = Response (fromByteString nid) (parseNodes nodes)
+        where parseNodes = Nodes . (map bstringToNodeInfo)
+              bstringToNodeInfo (BString n') = fromByteString n'
+              bstringToNodeInfo _ = undefined
+              isListOfBS [] = True
+              isListOfBS ((BString _) : _) = True
+              isListOfBS _ = False
 
 bDictMapToMsg (Cons
                 e
@@ -242,7 +307,8 @@ instance BEncode KPacket where
     fromBEncode (BDict (Cons a meat
                             (Cons t (BString tid)
                                 (Cons y yval Nil))))
-        | t == stringpack "t" = Right $ KPacket tid (bDictMapToMsg xs)
+        |  t == stringpack "t"
+        && y == bs_y  = Right $ KPacket tid (bDictMapToMsg xs)
             where xs = singleton a meat `union` singleton y yval
 
     fromBEncode _ = decodingError "- this doesn't look like a KRPC message"
