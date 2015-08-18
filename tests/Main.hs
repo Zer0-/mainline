@@ -66,11 +66,11 @@ fmt_decodeFindNodeQuery i n t = fromBEncode bval == (Right $ KPacket tid (Query 
 
 fmt_decodeNodeResponse :: [Word8] -> [Word8] -> [Word8] -> Bool
 fmt_decodeNodeResponse t i n
-        = fromBEncode bval == (Right $
-                               KPacket tid $
-                                   Response
-                                       (fromByteString nid)
-                                       (Node $ fromByteString ni))
+    = fromBEncode bval == (Right $
+                           KPacket tid $
+                               Response
+                                   (fromByteString nid)
+                                   (Node $ fromByteString ni))
     where tid = pack t
           nid = pack i
           ni = pack n
@@ -83,11 +83,11 @@ fmt_decodeNodeResponse t i n
 
 fmt_decodeNodesResponse :: [Word8] -> [Word8] -> [[Word8]] -> Bool
 fmt_decodeNodesResponse t i ns
-        = fromBEncode bval == (Right $
-                               KPacket tid $
-                                   Response
-                                       (fromByteString nid)
-                                       (Nodes $ map fromOctets ns))
+    = fromBEncode bval == (Right $
+                           KPacket tid $
+                               Response
+                                   (fromByteString nid)
+                                   (Nodes $ map fromOctets ns))
     where tid = pack t
           nid = pack i
           bval = BDict $
@@ -95,6 +95,20 @@ fmt_decodeNodesResponse t i ns
                 singleton bs_id (BString nid)
                 `union` singleton (stringpack "nodes") (BList (map (\x -> BString (pack x)) ns)))
             `union` bd "y" "r"
+            `union` singleton bs_t (BString tid)
+
+fmt_decodeAskPeersQuery :: [Word8] -> [Word8] -> [Word8] -> Bool
+fmt_decodeAskPeersQuery t i info
+    = fromBEncode bval == (Right $
+                          KPacket tid $ Query (fromByteString nid) (AskPeers $ fromOctets info))
+    where tid = pack t
+          nid = pack i
+          bval = BDict $
+            singleton bs_a (BDict $
+                singleton bs_id (BString nid)
+                `union` singleton (stringpack "info_hash") (BString (pack info)))
+            `union` bd "y" "q"
+            `union` bd "q" "get_peers"
             `union` singleton bs_t (BString tid)
 
 tests :: [Test]
@@ -109,7 +123,8 @@ tests = [
             testProperty "decode Ping Response Message"            fmt_decodePingResponse,
             testProperty "decode FindNode Query Message"           fmt_decodeFindNodeQuery,
             testProperty "decode Node Response Message"            fmt_decodeNodeResponse,
-            testProperty "decode Nodes Response Message"           fmt_decodeNodesResponse
+            testProperty "decode Nodes Response Message"           fmt_decodeNodesResponse,
+            testProperty "decode AskPeers Query Message"           fmt_decodeAskPeersQuery
             ]
         ]
 

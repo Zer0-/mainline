@@ -274,6 +274,19 @@ bDictMapToMsg (Cons r (BDict (Cons i (BString nid) (Cons n (BList nodes) Nil)))
               isListOfBS ((BString _) : _) = True
               isListOfBS _ = False
 
+--AskPeers Query
+bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
+                             (Cons n (BString info) Nil)))
+                (Cons _ (BString qval)
+                    (Cons _ (BString yval) Nil)))
+    |  yval == bs_q
+    && a == bs_a
+    && i == bs_id
+    && n == stringpack "info_hash"
+    && qval == stringpack "get_peers"
+    = Query (fromByteString nid) (AskPeers $ fromByteString info)
+
+--Error Message
 bDictMapToMsg (Cons
                 e
                 (BList ((BInteger code) : (BString msg) : []))
