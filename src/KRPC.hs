@@ -93,6 +93,11 @@ instance BEncode CompactInfo where
     toBEncode = bEncode
     fromBEncode = undefined
 
+instance Show CompactInfo where
+    show (CompactInfo i p)
+        = "CompactInfo<ip: " ++ show i
+        ++ " port: " ++ show p ++ ">"
+
 instance BEncode NodeInfo where
     toBEncode = bEncode
     fromBEncode = undefined
@@ -119,6 +124,8 @@ instance Show Message where
                                         ++ show msg ++ "}"
     show (FindNode nid) = "FindNode<" ++ show nid ++ ">"
     show (Nodes ns) = "Nodes[" ++ intercalate "," (map (\x -> show . BS.pack $ octets x) ns) ++ "]"
+    show (PeersFound t msg) = "PeersFound{token: " ++ show t ++ " " ++ show msg ++ "}"
+    show (Values v) = "Values" ++ show v
     show Ping = "Ping"
     show _ = ""
 
@@ -264,8 +271,8 @@ bDictMapToMsg (Cons r (BDict (Cons i (BString nid) (Cons n (BString nodes) Nil))
 --AskPeers Query
 bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
                              (Cons n (BString info) Nil)))
-                (Cons _ (BString qval)
-                    (Cons _ (BString yval) Nil)))
+              (Cons _ (BString qval)
+              (Cons _ (BString yval) Nil)))
     |  yval == bs_q
     && a == bs_a
     && i == bs_id
@@ -273,26 +280,40 @@ bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
     && qval == stringpack "get_peers"
     = Query (fromByteString nid) (AskPeers $ fromByteString info)
 
---PeersFound Response
+--PeersFound Values Response
 bDictMapToMsg (Cons r
                   (BDict
                       (Cons i (BString nid)
                       (Cons t (BString token)
                       (Cons v (BList values) Nil))))
                   (Cons _ (BString yval) Nil))
-    |  yval == bs_r
+    | yval == bs_r
         && r == bs_r
         && i == bs_id
         && t == stringpack "token"
         && v == stringpack "values"
         && isListOfBS values
     = Response (fromByteString nid) (PeersFound token (parseValues values))
-        where parseValues = Values . (map bstringToNodeInfo)
-              bstringToNodeInfo (BString n') = fromByteString n'
-              bstringToNodeInfo _ = undefined
+        where parseValues = Values . (map bsToCompactInfo)
+              bsToCompactInfo (BString n') = fromByteString n'
+              bsToCompactInfo _ = undefined
               isListOfBS [] = True
               isListOfBS ((BString _) : _) = True
               isListOfBS _ = False
+
+--PeersFound Nodes Response
+bDictMapToMsg (Cons r
+                  (BDict
+                      (Cons i (BString nid)
+                      (Cons t (BString token)
+                      (Cons n (BString nodes) Nil))))
+                  (Cons _ (BString yval) Nil))
+    |  yval == bs_r
+        && r == bs_r
+        && i == bs_id
+        && t == stringpack "token"
+        && n == stringpack "nodes"
+    = Response (fromByteString nid) (PeersFound token (parseNodes nodes))
 
 --Error Message
 bDictMapToMsg (Cons e
@@ -315,9 +336,9 @@ instance BEncode KPacket where
         BDict $ singleton (stringpack "t") (BString t) `union` (msgToBDictMap m)
 
     fromBEncode (BDict (Cons a meat
-                            (Cons q qval
-                                (Cons t (BString tid)
-                                    (Cons y yval Nil)))))
+                       (Cons q qval
+                       (Cons t (BString tid)
+                       (Cons y yval Nil)))))
         |  t == bs_t
         && q == bs_q = Right $ KPacket tid (bDictMapToMsg xs)
             where xs = singleton a meat

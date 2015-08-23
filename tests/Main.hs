@@ -9,12 +9,11 @@ import Data.Word (Word32, Word8)
 import qualified Data.Map as Map
 
 import Data.ByteString (pack)
-import qualified Data.ByteString as BS
 
 import Data.BEncode
 import Data.BEncode.BDict hiding (map)
 
---import Debug.Trace
+import Debug.Trace
 
 prop_fits :: Word32 -> Int -> Word32 -> Word32 -> Word32 -> Bool
 prop_fits bid size bmin bmax value =
@@ -100,6 +99,24 @@ fmt_decodeAskPeersQuery t i info
             `union` bd "q" "get_peers"
             `union` singleton bs_t (BString tid)
 
+fmt_decodeFoundValuesResponse :: [Word8] -> [Word8] -> [Word8] -> [[Word8]] -> Bool
+fmt_decodeFoundValuesResponse t i token values
+    = traceShowId ((fromBEncode bval) :: Result KPacket) == trace ("expected: " ++ show (expected :: Result KPacket)) expected
+    where tid = pack t
+          bval = traceShowId $ BDict $
+            singleton bs_r (BDict $
+                singleton bs_id (BString $ pack i)
+                `union` singleton (stringpack "token") (BString $ pack token)
+                `union` singleton (stringpack "values") (BList $ map (BString . pack) values))
+            `union` bd "y" "r"
+            `union` singleton bs_t (BString tid)
+          expected = (Right $
+                           KPacket tid $ Response (fromOctets i) $
+                                            PeersFound (pack token) (Values $ mkValues values))
+          mkValues :: [[Word8]] -> [CompactInfo]
+          mkValues [] = []
+          mkValues (x : xs) = fromOctets x : mkValues xs
+
 tests :: [Test]
 tests = [
         testGroup "QuickCheck Bucket" [
@@ -112,7 +129,8 @@ tests = [
             testProperty "decode Ping Response Message"            fmt_decodePingResponse,
             testProperty "decode FindNode Query Message"           fmt_decodeFindNodeQuery,
             testProperty "decode Nodes Response Message"           fmt_decodeNodesResponse,
-            testProperty "decode AskPeers Query Message"           fmt_decodeAskPeersQuery
+            testProperty "decode AskPeers Query Message"           fmt_decodeAskPeersQuery,
+            testProperty "decode PeersFound Values Message"        fmt_decodeFoundValuesResponse
             ]
         ]
 
