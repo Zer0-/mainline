@@ -2,8 +2,8 @@ module KRPC where
 
 import Data.Word
 import Data.Bits
-import Data.List (foldl')
-import Data.ByteString (pack, unpack, ByteString)
+import Data.List (foldl', intercalate)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as Char8
 import Data.Digest.SHA1 (Word160 (Word160))
 import Data.BEncode
@@ -31,12 +31,12 @@ data NodeInfo = NodeInfo
 instance Eq NodeInfo where
     NodeInfo i c == NodeInfo i' c' = i == i' && c == c'
 
-type Token = ByteString
+type Token = BS.ByteString
 
-stringpack :: String -> ByteString
+stringpack :: String -> BS.ByteString
 stringpack = Char8.pack
 
-stringunpack :: ByteString -> String
+stringunpack :: BS.ByteString -> String
 stringunpack = Char8.unpack
 
 numFromOctets :: (Num a, Bits a) => [Word8] -> a
@@ -87,7 +87,7 @@ instance Octets NodeInfo where
                             (fromOctets $ drop 160 bytes)
 
 bEncode :: (Octets a) => a -> BValue
-bEncode = toBEncode . pack . octets
+bEncode = toBEncode . BS.pack . octets
 
 instance BEncode CompactInfo where
     toBEncode = bEncode
@@ -103,7 +103,6 @@ data Message
     | Ping
     | FindNode NodeID
     | Nodes [NodeInfo]
-    | Node NodeInfo
     | AskPeers InfoHash
     | PeersFound Token Message
     | Values [CompactInfo]
@@ -119,6 +118,7 @@ instance Show Message where
     show (Response nid msg) = "Response<from: " ++ show nid ++ ">{"
                                         ++ show msg ++ "}"
     show (FindNode nid) = "FindNode<" ++ show nid ++ ">"
+    show (Nodes ns) = "Nodes[" ++ intercalate "," (map (\x -> show . BS.pack $ octets x) ns) ++ "]"
     show Ping = "Ping"
     show _ = ""
 
@@ -128,7 +128,6 @@ instance Eq Message where
     Ping                 == Ping             = True
     FindNode a           == FindNode b       = a == b
     Nodes a              == Nodes b          = a == b
-    Node a               == Node b           = a == b
     AskPeers a           == AskPeers b       = a == b
     PeersFound t m       == PeersFound t' m' = t == t' && m == m'
     Values a             == Values b         = a == b
@@ -140,25 +139,25 @@ instance Eq Message where
 bd :: String -> String -> BDictMap BValue
 bd a b = singleton (stringpack a) (BString $ stringpack b)
 
-bs_y :: ByteString
+bs_y :: BS.ByteString
 bs_y = stringpack "y"
 
-bs_e :: ByteString
+bs_e :: BS.ByteString
 bs_e = stringpack "e"
 
-bs_q :: ByteString
+bs_q :: BS.ByteString
 bs_q = stringpack "q"
 
-bs_a :: ByteString
+bs_a :: BS.ByteString
 bs_a = stringpack "a"
 
-bs_r :: ByteString
+bs_r :: BS.ByteString
 bs_r = stringpack "r"
 
-bs_t :: ByteString
+bs_t :: BS.ByteString
 bs_t = stringpack "t"
 
-bs_id :: ByteString
+bs_id :: BS.ByteString
 bs_id = stringpack "id"
 
 msgName :: Message -> String
@@ -185,8 +184,8 @@ msgToBDictMap Ping = Nil
 
 msgToBDictMap (FindNode i) = singleton (stringpack "target") (bEncode i)
 
-msgToBDictMap (Node   n) = singleton (stringpack "nodes") (toBEncode n)
-msgToBDictMap (Nodes ns) = singleton (stringpack "nodes") (toBEncode ns)
+msgToBDictMap (Nodes ns) = singleton (stringpack "nodes") (toBEncode nodes)
+    where nodes = BS.concat $ map (BS.pack . octets) ns
 
 msgToBDictMap (AskPeers i) = singleton (stringpack "info_hash") (bEncode i)
 
@@ -212,8 +211,15 @@ msgToBDictMap _ = undefined
  - a e q r t y
  -}
 
-fromByteString :: (Octets a) => ByteString -> a
-fromByteString = fromOctets . unpack
+fromByteString :: (Octets a) => BS.ByteString -> a
+fromByteString = fromOctets . BS.unpack
+
+parseNodes :: BS.ByteString -> Message
+parseNodes = Nodes . (map fromByteString) . splitBytes
+    where splitBytes :: BS.ByteString -> [BS.ByteString]
+          splitBytes b
+              | BS.null b = []
+              | otherwise = BS.take 166 b : splitBytes (BS.drop 166 b)
 
 bDictMapToMsg :: BDictMap BValue -> Message
 
@@ -246,33 +252,14 @@ bDictMapToMsg (Cons a (BDict (Cons i (BString nid) (Cons t (BString tval) Nil)))
     && i == bs_id
     = Query (fromByteString nid) (FindNode (fromByteString tval))
 
---Node Response (single node)
-bDictMapToMsg (Cons r
-                  (BDict
-                      (Cons i (BString nid)
-                      (Cons n (BString ni) Nil)))
-                  (Cons _ (BString yval) Nil))
-    |  yval == bs_r
-    && r == bs_r
-    && i == bs_id
-    && n == stringpack "nodes"
-    = Response (fromByteString nid) (Node $ fromByteString ni)
-
---Nodes Response (list)                              different↴
-bDictMapToMsg (Cons r (BDict (Cons i (BString nid) (Cons n (BList nodes) Nil)))
+--Nodes Response
+bDictMapToMsg (Cons r (BDict (Cons i (BString nid) (Cons n (BString nodes) Nil)))
                 (Cons _ (BString yval) Nil))
     |  yval == bs_r
     && r == bs_r
     && i == bs_id
     && n == stringpack "nodes"
-    && isListOfBS nodes
     = Response (fromByteString nid) (parseNodes nodes)
-        where parseNodes = Nodes . (map bstringToNodeInfo)
-              bstringToNodeInfo (BString n') = fromByteString n'
-              bstringToNodeInfo _ = undefined
-              isListOfBS [] = True
-              isListOfBS ((BString _) : _) = True
-              isListOfBS _ = False
 
 --AskPeers Query
 bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
@@ -286,9 +273,29 @@ bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
     && qval == stringpack "get_peers"
     = Query (fromByteString nid) (AskPeers $ fromByteString info)
 
+--PeersFound Response
+bDictMapToMsg (Cons r
+                  (BDict
+                      (Cons i (BString nid)
+                      (Cons t (BString token)
+                      (Cons v (BList values) Nil))))
+                  (Cons _ (BString yval) Nil))
+    |  yval == bs_r
+        && r == bs_r
+        && i == bs_id
+        && t == stringpack "token"
+        && v == stringpack "values"
+        && isListOfBS values
+    = Response (fromByteString nid) (PeersFound token (parseValues values))
+        where parseValues = Values . (map bstringToNodeInfo)
+              bstringToNodeInfo (BString n') = fromByteString n'
+              bstringToNodeInfo _ = undefined
+              isListOfBS [] = True
+              isListOfBS ((BString _) : _) = True
+              isListOfBS _ = False
+
 --Error Message
-bDictMapToMsg (Cons
-                e
+bDictMapToMsg (Cons e
                 (BList ((BInteger code) : (BString msg) : []))
                 (Cons y (BString yval) Nil))
     | e == bs_e && y == bs_y && yval == bs_e = Error code (stringunpack msg)
@@ -296,7 +303,7 @@ bDictMapToMsg (Cons
 bDictMapToMsg _ = undefined
 
 data KPacket = KPacket
-    { transactionId :: ByteString
+    { transactionId :: BS.ByteString
     , message       :: Message
     }
 

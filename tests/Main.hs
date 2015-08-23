@@ -9,6 +9,7 @@ import Data.Word (Word32, Word8)
 import qualified Data.Map as Map
 
 import Data.ByteString (pack)
+import qualified Data.ByteString as BS
 
 import Data.BEncode
 import Data.BEncode.BDict hiding (map)
@@ -64,38 +65,26 @@ fmt_decodeFindNodeQuery i n t = fromBEncode bval == (Right $ KPacket tid (Query 
           nid = pack n
           target = pack t
 
-fmt_decodeNodeResponse :: [Word8] -> [Word8] -> [Word8] -> Bool
-fmt_decodeNodeResponse t i n
-    = fromBEncode bval == (Right $
-                           KPacket tid $
-                               Response
-                                   (fromByteString nid)
-                                   (Node $ fromByteString ni))
-    where tid = pack t
-          nid = pack i
-          ni = pack n
-          bval = BDict $
-            singleton bs_r (BDict $
-                singleton bs_id (BString nid)
-                `union` singleton (stringpack "nodes") (BString ni))
-            `union` bd "y" "r"
-            `union` (singleton bs_t (BString tid))
-
-fmt_decodeNodesResponse :: [Word8] -> [Word8] -> [[Word8]] -> Bool
+fmt_decodeNodesResponse :: [Word8] -> [Word8] -> [Word8] -> Bool
 fmt_decodeNodesResponse t i ns
-    = fromBEncode bval == (Right $
-                           KPacket tid $
-                               Response
-                                   (fromByteString nid)
-                                   (Nodes $ map fromOctets ns))
+    = fromBEncode bval == expected
     where tid = pack t
           nid = pack i
           bval = BDict $
             singleton bs_r (BDict $
                 singleton bs_id (BString nid)
-                `union` singleton (stringpack "nodes") (BList (map (\x -> BString (pack x)) ns)))
+                `union` singleton (stringpack "nodes") (BString $ pack ns))
             `union` bd "y" "r"
             `union` singleton bs_t (BString tid)
+          expected :: Result KPacket
+          expected = (Right $
+                       KPacket tid $
+                           Response
+                               (fromByteString nid)
+                               (Nodes $ mkNodes ns))
+          mkNodes :: [Word8] -> [NodeInfo]
+          mkNodes [] = []
+          mkNodes xs = fromOctets (take 166 xs) : mkNodes (drop 166 xs)
 
 fmt_decodeAskPeersQuery :: [Word8] -> [Word8] -> [Word8] -> Bool
 fmt_decodeAskPeersQuery t i info
@@ -122,33 +111,11 @@ tests = [
             testProperty "decode Ping Query Message"               fmt_decodePingQuery,
             testProperty "decode Ping Response Message"            fmt_decodePingResponse,
             testProperty "decode FindNode Query Message"           fmt_decodeFindNodeQuery,
-            testProperty "decode Node Response Message"            fmt_decodeNodeResponse,
             testProperty "decode Nodes Response Message"           fmt_decodeNodesResponse,
             testProperty "decode AskPeers Query Message"           fmt_decodeAskPeersQuery
             ]
         ]
 
-{-
-testbval = BDict $
-                (singleton (stringpack "t") (BString (stringpack "")))
-                `union` bd "y" "e"
-                `union` (singleton (stringpack "e") (BList [BInteger 0, BString (stringpack "")]))
-
-testKPacket :: KPacket
-testKPacket = KPacket (stringpack "transaction") (Query (Word160 0 0 0 0 1337) Ping)
-
-testKPacket :: KPacket
-testKPacket = KPacket (stringpack "transaction2") (
-    Nodes [ NodeInfo (Word160 1 1 1 1 1337) (CompactInfo 192 8080)
-          , NodeInfo (Word160 2 2 2 2 1338) (CompactInfo 168 9999)
-          ]
-    )
--}
-
 main :: IO ()
 main = do
     defaultMain tests
-{-
-    putStrLn $ show $ testbval
-    putStrLn $ show $ ((fromBEncode testbval) :: Result KPacket)
--}
