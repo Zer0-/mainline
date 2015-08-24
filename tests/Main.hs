@@ -13,7 +13,7 @@ import Data.ByteString (pack)
 import Data.BEncode
 import Data.BEncode.BDict hiding (map)
 
-import Debug.Trace
+--import Debug.Trace
 
 prop_fits :: Word32 -> Int -> Word32 -> Word32 -> Word32 -> Bool
 prop_fits bid size bmin bmax value =
@@ -101,21 +101,36 @@ fmt_decodeAskPeersQuery t i info
 
 fmt_decodeFoundValuesResponse :: [Word8] -> [Word8] -> [Word8] -> [[Word8]] -> Bool
 fmt_decodeFoundValuesResponse t i token values
-    = traceShowId ((fromBEncode bval) :: Result KPacket) == trace ("expected: " ++ show (expected :: Result KPacket)) expected
+    = fromBEncode bval == expected
     where tid = pack t
-          bval = traceShowId $ BDict $
+          bval = BDict $
             singleton bs_r (BDict $
                 singleton bs_id (BString $ pack i)
                 `union` singleton (stringpack "token") (BString $ pack token)
                 `union` singleton (stringpack "values") (BList $ map (BString . pack) values))
             `union` bd "y" "r"
             `union` singleton bs_t (BString tid)
-          expected = (Right $
-                           KPacket tid $ Response (fromOctets i) $
-                                            PeersFound (pack token) (Values $ mkValues values))
+          expected = (Right $ KPacket tid $
+                           Response (fromOctets i) $
+                           PeersFound (pack token) (Values $ mkValues values))
           mkValues :: [[Word8]] -> [CompactInfo]
           mkValues [] = []
           mkValues (x : xs) = fromOctets x : mkValues xs
+
+fmt_decodeFoundNodesResponse :: [Word8] -> [Word8] -> [Word8] -> [Word8] -> Bool
+fmt_decodeFoundNodesResponse t i token nodes
+    = fromBEncode bval == expected
+    where tid = pack t
+          bval = BDict $
+            singleton bs_r (BDict $
+                singleton bs_id (BString $ pack i)
+                `union` singleton (stringpack "token") (BString $ pack token)
+                `union` singleton (stringpack "nodes") (BString $ pack nodes))
+            `union` bd "y" "r"
+            `union` singleton bs_t (BString tid)
+          expected = (Right $ KPacket tid $
+                           Response (fromOctets i) $
+                           PeersFound (pack token) (parseNodes $ pack nodes))
 
 tests :: [Test]
 tests = [
@@ -130,7 +145,8 @@ tests = [
             testProperty "decode FindNode Query Message"           fmt_decodeFindNodeQuery,
             testProperty "decode Nodes Response Message"           fmt_decodeNodesResponse,
             testProperty "decode AskPeers Query Message"           fmt_decodeAskPeersQuery,
-            testProperty "decode PeersFound Values Message"        fmt_decodeFoundValuesResponse
+            testProperty "decode PeersFound Values Message"        fmt_decodeFoundValuesResponse,
+            testProperty "decode PeersFound Nodes Message"         fmt_decodeFoundNodesResponse
             ]
         ]
 

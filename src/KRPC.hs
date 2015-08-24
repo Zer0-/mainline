@@ -281,8 +281,7 @@ bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
     = Query (fromByteString nid) (AskPeers $ fromByteString info)
 
 --PeersFound Values Response
-bDictMapToMsg (Cons r
-                  (BDict
+bDictMapToMsg (Cons r (BDict
                       (Cons i (BString nid)
                       (Cons t (BString token)
                       (Cons v (BList values) Nil))))
@@ -302,11 +301,10 @@ bDictMapToMsg (Cons r
               isListOfBS _ = False
 
 --PeersFound Nodes Response
-bDictMapToMsg (Cons r
-                  (BDict
+bDictMapToMsg (Cons r (BDict
                       (Cons i (BString nid)
-                      (Cons t (BString token)
-                      (Cons n (BString nodes) Nil))))
+                      (Cons n (BString nodes)
+                      (Cons t (BString token) Nil))))
                   (Cons _ (BString yval) Nil))
     |  yval == bs_r
         && r == bs_r
