@@ -151,7 +151,8 @@ fmt_decodeAnnoucePeerQuery t i token nfo pval impliedPortArg impliedPortVal
                 `union` singleton (stringpack "info_hash") (BString $ pack nfo)
                 `union` singleton (stringpack "port") (BString $ pack pval)
                 `union` singleton (stringpack "token") (BString $ pack token))
-            `union` bd "y" "r"
+            `union` bd "q" "announce_peer"
+            `union` bd "y" "q"
             `union` singleton bs_t (BString tid)
           expected = (Right $ KPacket tid $
                            Query (fromOctets i) $

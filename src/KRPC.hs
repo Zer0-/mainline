@@ -314,8 +314,10 @@ bDictMapToMsg (Cons a (BDict
                       (Cons n (BString nfo)
                       (Cons p (BString pval)
                       (Cons t (BString token) Nil)))))
-                  (Cons _ (BString yval) Nil))
-    |  yval == bs_r
+                  (Cons _ (BString qval)
+                  (Cons _ (BString yval) Nil)))
+    |  yval == bs_q
+        && qval == stringpack "announce_peer"
         && a == bs_a
         && n == stringpack "info_hash"
         && p == stringpack "port"
@@ -334,8 +336,10 @@ bDictMapToMsg (Cons a (BDict
                       (Cons n (BString nfo)
                       (Cons p (BString pval)
                       (Cons t (BString token) Nil))))))
-                  (Cons _ (BString yval) Nil))
-    |  yval == bs_r
+                  (Cons _ (BString qval)
+                  (Cons _ (BString yval) Nil)))
+    |  yval == bs_q
+        && qval == stringpack "announce_peer"
         && a == bs_a
         && im == stringpack "implied_port"
         && n == stringpack "info_hash"
