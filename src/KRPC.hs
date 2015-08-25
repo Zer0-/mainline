@@ -1,3 +1,4 @@
+--TODO: Validate lengths on parsing
 module KRPC where
 
 import Data.Word
@@ -212,12 +213,6 @@ msgToBDictMap (AnnouncePeer infohash portnum token implied_port) =
 
 msgToBDictMap _ = undefined
 
-{-
- - >>> sorted([b'e', b'y', b't', b'q', b'r', b'a'])
- - [b'a', b'e', b'q', b'r', b't', b'y']
- - a e q r t y
- -}
-
 fromByteString :: (Octets a) => BS.ByteString -> a
 fromByteString = fromOctets . BS.unpack
 
@@ -313,6 +308,46 @@ bDictMapToMsg (Cons r (BDict
         && n == stringpack "nodes"
     = Response (fromByteString nid) (PeersFound token (parseNodes nodes))
 
+--Announce Peers Query (implied port ignored)
+bDictMapToMsg (Cons a (BDict
+                      (Cons i (BString nid)
+                      (Cons n (BString nfo)
+                      (Cons p (BString pval)
+                      (Cons t (BString token) Nil)))))
+                  (Cons _ (BString yval) Nil))
+    |  yval == bs_r
+        && a == bs_a
+        && n == stringpack "info_hash"
+        && p == stringpack "port"
+        && i == bs_id
+        && t == stringpack "token"
+    = Query (fromByteString nid) $
+        AnnouncePeer (fromByteString nfo)
+                     (fromByteString pval)
+                     token
+                     False
+
+--Announce Peers Query
+bDictMapToMsg (Cons a (BDict
+                      (Cons i (BString nid)
+                      (Cons im (BInteger impliedPort)
+                      (Cons n (BString nfo)
+                      (Cons p (BString pval)
+                      (Cons t (BString token) Nil))))))
+                  (Cons _ (BString yval) Nil))
+    |  yval == bs_r
+        && a == bs_a
+        && im == stringpack "implied_port"
+        && n == stringpack "info_hash"
+        && p == stringpack "port"
+        && i == bs_id
+        && t == stringpack "token"
+    = Query (fromByteString nid) $
+        AnnouncePeer (fromByteString nfo)
+                     (fromByteString pval)
+                     token
+                     (impliedPort == 1)
+
 --Error Message
 bDictMapToMsg (Cons e
                 (BList ((BInteger code) : (BString msg) : []))
@@ -344,8 +379,8 @@ instance BEncode KPacket where
                         `union` singleton y yval
 
     fromBEncode (BDict (Cons a meat
-                            (Cons t (BString tid)
-                                (Cons y yval Nil))))
+                       (Cons t (BString tid)
+                       (Cons y yval Nil))))
         |  t == stringpack "t"
         && y == bs_y  = Right $ KPacket tid (bDictMapToMsg xs)
             where xs = singleton a meat `union` singleton y yval

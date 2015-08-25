@@ -132,6 +132,37 @@ fmt_decodeFoundNodesResponse t i token nodes
                            Response (fromOctets i) $
                            PeersFound (pack token) (parseNodes $ pack nodes))
 
+fmt_decodeAnnoucePeerQuery
+    :: [Word8]
+    -> [Word8]
+    -> [Word8]
+    -> [Word8]
+    -> [Word8]
+    -> Bool
+    -> Integer
+    -> Bool
+fmt_decodeAnnoucePeerQuery t i token nfo pval impliedPortArg impliedPortVal
+    = fromBEncode bval == expected
+    where tid = pack t
+          bval = BDict $
+            singleton bs_a (BDict $
+                singleton bs_id (BString $ pack i)
+                `union` impliedPort
+                `union` singleton (stringpack "info_hash") (BString $ pack nfo)
+                `union` singleton (stringpack "port") (BString $ pack pval)
+                `union` singleton (stringpack "token") (BString $ pack token))
+            `union` bd "y" "r"
+            `union` singleton bs_t (BString tid)
+          expected = (Right $ KPacket tid $
+                           Query (fromOctets i) $
+                               AnnouncePeer (fromOctets nfo)
+                                            (fromOctets pval)
+                                            (pack token)
+                                            (impliedPortArg == True && impliedPortVal == 1))
+          impliedPort = if impliedPortArg
+                            then singleton (stringpack "implied_port") (BInteger impliedPortVal)
+                            else empty
+
 tests :: [Test]
 tests = [
         testGroup "QuickCheck Bucket" [
@@ -146,7 +177,8 @@ tests = [
             testProperty "decode Nodes Response Message"           fmt_decodeNodesResponse,
             testProperty "decode AskPeers Query Message"           fmt_decodeAskPeersQuery,
             testProperty "decode PeersFound Values Message"        fmt_decodeFoundValuesResponse,
-            testProperty "decode PeersFound Nodes Message"         fmt_decodeFoundNodesResponse
+            testProperty "decode PeersFound Nodes Message"         fmt_decodeFoundNodesResponse,
+            testProperty "decode Announce Peer Query"              fmt_decodeAnnoucePeerQuery
             ]
         ]
 
