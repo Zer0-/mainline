@@ -363,7 +363,7 @@ bDictMapToMsg _ = undefined
 data KPacket = KPacket
     { transactionId :: BS.ByteString
     , message       :: Message
-    }
+    } deriving Eq
 
 instance Show KPacket where
     show (KPacket t m) = "KPacket{t:" ++ show t ++ " " ++ show m ++ "}"
@@ -390,6 +390,3 @@ instance BEncode KPacket where
             where xs = singleton a meat `union` singleton y yval
 
     fromBEncode _ = decodingError "- this doesn't look like a KRPC message"
-
-instance Eq KPacket where
-    KPacket tid msg == KPacket tid' msg' = tid == tid' && msg == msg'
