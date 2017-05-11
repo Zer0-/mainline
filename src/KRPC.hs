@@ -19,18 +19,12 @@ type Port = Word16
 data CompactInfo = CompactInfo
     { ip    :: Word32
     , port  :: Port
-    }
-
-instance Eq CompactInfo where
-    CompactInfo i p == CompactInfo i' p' = i == i' && p == p'
+    } deriving Eq
 
 data NodeInfo = NodeInfo
     { nodeId       :: NodeID
     , compactInfo  :: CompactInfo
-    }
-
-instance Eq NodeInfo where
-    NodeInfo i c == NodeInfo i' c' = i == i' && c == c'
+    } deriving Eq
 
 type Token = BS.ByteString
 
@@ -39,6 +33,9 @@ stringpack = Char8.pack
 
 stringunpack :: BS.ByteString -> String
 stringunpack = Char8.unpack
+
+extendListWith :: (Enum a) => [a] -> a -> [a]
+extendListWith l a = l ++ [a, a..]
 
 numFromOctets :: (Num a, Bits a) => [Word8] -> a
 numFromOctets = foldl' accum 0
@@ -54,7 +51,7 @@ instance Octets Word16 where
         [ fromIntegral (w `shiftR` 8)
         , fromIntegral w
         ]
-    fromOctets = numFromOctets
+    fromOctets = numFromOctets . (take 2) . (`extendListWith` 0)
 
 instance Octets Word32 where
     octets w =
@@ -63,17 +60,18 @@ instance Octets Word32 where
         , fromIntegral (w `shiftR` 8)
         , fromIntegral w
         ]
-    fromOctets = numFromOctets
+    fromOctets = numFromOctets . (take 4) . (`extendListWith` 0)
 
 instance Octets Word160 where
-    octets (Word160 a1 a2 a3 a4 a5) = octets a1 ++ octets a2 ++ octets a3 ++ octets a4 ++ octets a5
+    octets (Word160 a1 a2 a3 a4 a5)
+        = octets a1 ++ octets a2 ++ octets a3 ++ octets a4 ++ octets a5
 
     fromOctets bytes = Word160 a b c d e
-        where a = fromOctets $ take 32 bytes
-              b = fromOctets $ take 32 (drop 32 bytes)
-              c = fromOctets $ take 32 (drop 64 bytes)
-              d = fromOctets $ take 32 (drop 96 bytes)
-              e = fromOctets $ take 32 (drop 128 bytes)
+        where a = fromOctets $ take 4 bytes
+              b = fromOctets $ take 4 (drop 4 bytes)
+              c = fromOctets $ take 4 (drop 8 bytes)
+              d = fromOctets $ take 4 (drop 12 bytes)
+              e = fromOctets $ take 4 (drop 16 bytes)
 
 instance Octets CompactInfo where
     octets (CompactInfo i p) = octets i ++ octets p
@@ -87,8 +85,14 @@ instance Octets NodeInfo where
     fromOctets bytes = NodeInfo (fromOctets $ take 160 bytes)
                             (fromOctets $ drop 160 bytes)
 
+octToByteString :: (Octets a) => a -> BS.ByteString
+octToByteString = BS.pack . octets
+
+octToString :: (Octets a) => a -> String
+octToString = show . octToByteString
+
 bEncode :: (Octets a) => a -> BValue
-bEncode = toBEncode . BS.pack . octets
+bEncode = toBEncode . octToByteString
 
 instance BEncode CompactInfo where
     toBEncode = bEncode
@@ -114,35 +118,22 @@ data Message
     | Values [CompactInfo]
     | AnnouncePeer InfoHash Port Token Bool -- last arg is implied_port
     | Error { errCode :: Integer, errMsg :: String }
+    deriving Eq
 
 instance Show Message where
     show (Error code msg) = "Error{code: " ++ show code
                                     ++ ", msg: " ++ show msg ++ "}"
 
-    show (Query nid msg) = "Query<from: " ++ show nid ++ ">{"
+    show (Query nid msg) = "Query<from: " ++ octToString nid ++ ">{"
                                         ++ show msg ++ "}"
-    show (Response nid msg) = "Response<from: " ++ show nid ++ ">{"
+    show (Response nid msg) = "Response<from: " ++ octToString nid ++ ">{"
                                         ++ show msg ++ "}"
-    show (FindNode nid) = "FindNode<" ++ show nid ++ ">"
-    show (Nodes ns) = "Nodes[" ++ intercalate "," (map (\x -> show . BS.pack $ octets x) ns) ++ "]"
+    show (FindNode nid) = "FindNode<" ++ octToString nid ++ ">"
+    show (Nodes ns) = "Nodes[" ++ intercalate "," (map octToString ns) ++ "]"
     show (PeersFound t msg) = "PeersFound{token: " ++ show t ++ " " ++ show msg ++ "}"
     show (Values v) = "Values" ++ show v
     show Ping = "Ping"
     show _ = ""
-
-instance Eq Message where
-    Query i xs           == Query i' xs'     = i == i' && xs == xs'
-    Response i xs        == Response i' xs'  = i == i' && xs == xs'
-    Ping                 == Ping             = True
-    FindNode a           == FindNode b       = a == b
-    Nodes a              == Nodes b          = a == b
-    AskPeers a           == AskPeers b       = a == b
-    PeersFound t m       == PeersFound t' m' = t == t' && m == m'
-    Values a             == Values b         = a == b
-    AnnouncePeer i p t b == AnnouncePeer i' p' t' b'
-        = i == i' && p == p' && t == t' && b == b'
-    Error e m            == Error e' m'      = e == e' && m == m'
-    _                    == _ = False
 
 bd :: String -> String -> BDictMap BValue
 bd a b = singleton (stringpack a) (BString $ stringpack b)
@@ -193,7 +184,7 @@ msgToBDictMap Ping = Nil
 msgToBDictMap (FindNode i) = singleton (stringpack "target") (bEncode i)
 
 msgToBDictMap (Nodes ns) = singleton (stringpack "nodes") (toBEncode nodes)
-    where nodes = BS.concat $ map (BS.pack . octets) ns
+    where nodes = BS.concat $ map octToByteString ns
 
 msgToBDictMap (AskPeers i) = singleton (stringpack "info_hash") (bEncode i)
 
