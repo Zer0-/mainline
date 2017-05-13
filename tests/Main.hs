@@ -189,7 +189,7 @@ tests =
         [ testProperty "Fits into bucket and split"              prop_fits
         , testProperty "Always store things in boundless bucket" prop_size
         ]
-    , testGroup "Word byte reversable encoding"
+    , testGroup "Words Octets instance is reversable"
         [ testProperty "ByteString to Word16 is reversable"      word16_bytestring_bijection
         , testProperty "ByteString to Word32 is reversable"      word32_bytestring_bijection
         , testProperty "ByteString to Word160 is reversable"     word160_bytestring_bijection

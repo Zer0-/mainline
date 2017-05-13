@@ -32,11 +32,9 @@ insert key value (Split a b)
     | otherwise = insert key value b
 
 insert key value bucket
-    | bmin <= key && key < bmax && Map.size bmap < bucketSize bucket
+    | Map.size bmap < bucketSize bucket
         = bucket { bucketData = Map.insert key value bmap }
-    | bmin <= key && key < bmax && fits (bucketId bucket) bucket
+    | fits (bucketId bucket) bucket
         = insert key value $ split bucket
     | otherwise = bucket
-        where bmin = minVal bucket
-              bmax = maxVal bucket
-              bmap = bucketData bucket
+    where bmap = bucketData bucket
