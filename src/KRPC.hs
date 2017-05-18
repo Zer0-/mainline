@@ -214,7 +214,7 @@ parseNodes = Nodes . (map fromByteString) . splitBytes
               | BS.null b = []
               | otherwise = BS.take 166 b : splitBytes (BS.drop 166 b)
 
-bDictMapToMsg :: BDictMap BValue -> Message
+bDictMapToMsg :: BDictMap BValue -> Either String Message
 
 --Ping Query
 bDictMapToMsg (Cons a (BDict (Cons i (BString nid) Nil))
@@ -224,7 +224,7 @@ bDictMapToMsg (Cons a (BDict (Cons i (BString nid) Nil))
     && qval == stringpack "ping"
     && a == bs_a
     && i == bs_id
-    = Query (fromByteString nid) Ping
+    = Right $ Query (fromByteString nid) Ping
 
 --Ping Response
 bDictMapToMsg (Cons r (BDict (Cons i (BString nid) Nil))
@@ -232,7 +232,7 @@ bDictMapToMsg (Cons r (BDict (Cons i (BString nid) Nil))
     |  yval == bs_r
     && r == bs_r
     && i == bs_id
-    = Response (fromByteString nid) Ping
+    = Right $ Response (fromByteString nid) Ping
 
 --FindNode Query
 bDictMapToMsg (Cons a (BDict (Cons i (BString nid) (Cons t (BString tval) Nil)))
@@ -243,7 +243,7 @@ bDictMapToMsg (Cons a (BDict (Cons i (BString nid) (Cons t (BString tval) Nil)))
     && t == stringpack "target"
     && a == bs_a
     && i == bs_id
-    = Query (fromByteString nid) (FindNode (fromByteString tval))
+    = Right $ Query (fromByteString nid) (FindNode (fromByteString tval))
 
 --Nodes Response
 bDictMapToMsg (Cons r (BDict (Cons i (BString nid) (Cons n (BString nodes) Nil)))
@@ -252,7 +252,7 @@ bDictMapToMsg (Cons r (BDict (Cons i (BString nid) (Cons n (BString nodes) Nil))
     && r == bs_r
     && i == bs_id
     && n == stringpack "nodes"
-    = Response (fromByteString nid) (parseNodes nodes)
+    = Right $ Response (fromByteString nid) (parseNodes nodes)
 
 --AskPeers Query
 bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
@@ -264,7 +264,7 @@ bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
     && i == bs_id
     && n == stringpack "info_hash"
     && qval == stringpack "get_peers"
-    = Query (fromByteString nid) (AskPeers $ fromByteString info)
+    = Right $ Query (fromByteString nid) (AskPeers $ fromByteString info)
 
 --PeersFound Values Response
 bDictMapToMsg (Cons r (BDict
@@ -278,7 +278,7 @@ bDictMapToMsg (Cons r (BDict
         && t == stringpack "token"
         && v == stringpack "values"
         && isListOfBS values
-    = Response (fromByteString nid) (PeersFound token (parseValues values))
+    = Right $ Response (fromByteString nid) (PeersFound token (parseValues values))
         where parseValues = Values . (map bsToCompactInfo)
               bsToCompactInfo (BString n') = fromByteString n'
               bsToCompactInfo _ = undefined
@@ -297,7 +297,7 @@ bDictMapToMsg (Cons r (BDict
         && i == bs_id
         && t == stringpack "token"
         && n == stringpack "nodes"
-    = Response (fromByteString nid) (PeersFound token (parseNodes nodes))
+    = Right $ Response (fromByteString nid) (PeersFound token (parseNodes nodes))
 
 --Announce Peers Query (implied port ignored)
 bDictMapToMsg (Cons a (BDict
@@ -314,7 +314,7 @@ bDictMapToMsg (Cons a (BDict
         && p == stringpack "port"
         && i == bs_id
         && t == stringpack "token"
-    = Query (fromByteString nid) $
+    = Right $ Query (fromByteString nid) $
         AnnouncePeer (fromByteString nfo)
                      (fromByteString pval)
                      token
@@ -337,7 +337,7 @@ bDictMapToMsg (Cons a (BDict
         && p == stringpack "port"
         && i == bs_id
         && t == stringpack "token"
-    = Query (fromByteString nid) $
+    = Right $ Query (fromByteString nid) $
         AnnouncePeer (fromByteString nfo)
                      (fromByteString pval)
                      token
@@ -347,9 +347,9 @@ bDictMapToMsg (Cons a (BDict
 bDictMapToMsg (Cons e
                 (BList ((BInteger code) : (BString msg) : []))
                 (Cons y (BString yval) Nil))
-    | e == bs_e && y == bs_y && yval == bs_e = Error code (stringunpack msg)
+    | e == bs_e && y == bs_y && yval == bs_e = Right $ Error code (stringunpack msg)
 
-bDictMapToMsg _ = undefined
+bDictMapToMsg _ = Left "KRPC message decoding error"
 
 data KPacket = KPacket
     { transactionId :: BS.ByteString
@@ -367,17 +367,22 @@ instance BEncode KPacket where
                        (Cons q qval
                        (Cons t (BString tid)
                        (Cons y yval Nil)))))
-        |  t == bs_t
-        && q == bs_q = Right $ KPacket tid (bDictMapToMsg xs)
+        |  t == bs_t && q == bs_q =
+            case bDictMapToMsg xs of
+                Left  e -> Left e
+                Right x -> Right $ KPacket tid x
             where xs = singleton a meat
-                        `union` singleton q qval
-                        `union` singleton y yval
+                    `union` singleton q qval
+                    `union` singleton y yval
+
 
     fromBEncode (BDict (Cons a meat
                        (Cons t (BString tid)
                        (Cons y yval Nil))))
-        |  t == stringpack "t"
-        && y == bs_y  = Right $ KPacket tid (bDictMapToMsg xs)
+        |  t == bs_t && y == bs_y  =
+            case bDictMapToMsg xs of
+                Left  e -> Left e
+                Right x -> Right $ KPacket tid x
             where xs = singleton a meat `union` singleton y yval
 
     fromBEncode _ = decodingError "- this doesn't look like a KRPC message"
