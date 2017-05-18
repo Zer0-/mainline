@@ -8,6 +8,7 @@ import Network.Socket
 --  , bind
     , Family(AF_INET)
 --- , HostAddress
+    , Socket
     , SocketType(Datagram)
     , SockAddr(..)
     , AddrInfo(..)
@@ -21,6 +22,7 @@ import Network.Socket.ByteString (sendTo, recvFrom)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.BEncode (encode)
+import Data.Digest.SHA1 (Word160)
 import KRPC
 
 targetPort = "51413"
@@ -38,9 +40,19 @@ portFromSockAddr (SockAddrInet p _) = show p
 portFromSockAddr (SockAddrInet6 p _ _ _) = show p
 portFromSockAddr _ = undefined
 
-ping = (BS.concat . BL.toChunks . encode)
-    $ KPacket (stringpack "hello")
-    $ Query ((fromOctets . BS.unpack . stringpack) "hello world") Ping
+word160FromString :: String -> Word160
+word160FromString = fromByteString . stringpack
+
+ping :: KPacket
+ping = KPacket (stringpack "hello")
+    $ Query (word160FromString "hello world") Ping
+
+lazyBStoStrict :: BL.ByteString -> BS.ByteString
+lazyBStoStrict = BS.concat . BL.toChunks
+
+sendKpacket :: Socket -> SockAddr -> KPacket -> IO Int
+sendKpacket s a k = sendTo s (toBytes k) a
+    where toBytes = lazyBStoStrict . encode
 
 main :: IO ()
 main = do
@@ -49,9 +61,15 @@ main = do
     sock           <- socket AF_INET Datagram 0
     addrInfoList   <- getAddrInfo Nothing (Just targetHost) (Just targetPort)
     let targetInetAddr = addrAddress (head addrInfoList)
-    _ <- sendTo sock ping targetInetAddr
-    putStrLn $ "sent" ++ (show ping)
+
+    let sendToTarget = sendKpacket sock targetInetAddr
+
+    putStrLn $ "sending: " ++ show ping
+    bytesSent <- sendToTarget ping
+    putStrLn $ "sent " ++ show bytesSent ++ " bytes."
+
     (response, fromSocketAddr) <- recvFrom sock maxline
+
     fromHost <- hostFromSockAddr fromSocketAddr
     let fromPort = portFromSockAddr fromSocketAddr
     putStrLn $ "RESPONSE ("
