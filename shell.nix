@@ -5,7 +5,7 @@ let
   inherit (nixpkgs) pkgs;
 
   f = { mkDerivation, base, bencoding, bytestring, containers
-      , Crypto, HUnit, network, QuickCheck, stdenv, test-framework
+      , Crypto, HUnit, network, cpu, QuickCheck, stdenv, test-framework
       , test-framework-hunit, test-framework-quickcheck2
       }:
       mkDerivation {
@@ -16,10 +16,10 @@ let
         isExecutable = true;
         libraryHaskellDepends = [ base ];
         executableHaskellDepends = [
-          base bencoding bytestring containers Crypto network
+          base bencoding bytestring containers Crypto network cpu
         ];
         testHaskellDepends = [
-          base bencoding bytestring containers Crypto HUnit QuickCheck
+          base bencoding bytestring containers Crypto cpu HUnit QuickCheck
           test-framework test-framework-hunit test-framework-quickcheck2
         ];
         license = stdenv.lib.licenses.gpl2;

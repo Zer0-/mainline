@@ -3,32 +3,35 @@
  -}
 
 import Network.Socket
-    ( socket
+    ( Socket
+    , socket
 --  , sendTo
 --  , bind
     , Family(AF_INET)
---- , HostAddress
-    , Socket
     , SocketType(Datagram)
     , SockAddr(..)
-    , AddrInfo(..)
-    , getAddrInfo
     , inet_ntoa
 --  , iNADDR_ANY
     )
 
 import Network.Socket.ByteString (sendTo, recvFrom)
 
+import Data.Word (Word32)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.BEncode (encode)
 import Data.Digest.SHA1 (Word160)
 import KRPC
 
-targetPort = "51413"
-targetHost = "192.168.4.11"
+seedNodePort :: Port
+seedNodePort = 51413
+
+seedNodeHost :: Word32
+seedNodeHost = fromOctets [192, 168, 4, 11]
+
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
+maxline :: Int
 maxline = 2048
 
 hostFromSockAddr :: SockAddr -> IO String
@@ -54,19 +57,26 @@ sendKpacket :: Socket -> SockAddr -> KPacket -> IO Int
 sendKpacket s a k = sendTo s (toBytes k) a
     where toBytes = lazyBStoStrict . encode
 
+seedNodeInfo :: CompactInfo
+seedNodeInfo = CompactInfo seedNodeHost seedNodePort
+
+fireKPackets :: Socket -> [(KPacket, CompactInfo)] -> IO ()
+fireKPackets _ [] = return ()
+fireKPackets sock ((kpacket, CompactInfo ip_ port_):xs) = do
+    putStrLn $ "sending: " ++ show kpacket ++ "\n  to " ++ show addr
+    bytesSent <- sendKpacket sock addr kpacket
+    putStrLn $ "sent " ++ show bytesSent ++ " bytes."
+    fireKPackets sock xs
+    where
+        addr = SockAddrInet (fromIntegral $ port_) ip_
+
+--targetNodeAddr = SockAddrInet (fromIntegral $ port seedNodeInfo) (ip seedNodeInfo)
+
 main :: IO ()
 main = do
-    --putStrLn "What would you like to send?"
-    --payload <- getLine
     sock           <- socket AF_INET Datagram 0
-    addrInfoList   <- getAddrInfo Nothing (Just targetHost) (Just targetPort)
-    let targetInetAddr = addrAddress (head addrInfoList)
 
-    let sendToTarget = sendKpacket sock targetInetAddr
-
-    putStrLn $ "sending: " ++ show ping
-    bytesSent <- sendToTarget ping
-    putStrLn $ "sent " ++ show bytesSent ++ " bytes."
+    fireKPackets sock [(ping, seedNodeInfo)]
 
     (response, fromSocketAddr) <- recvFrom sock maxline
 

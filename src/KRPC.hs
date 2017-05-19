@@ -9,6 +9,7 @@ import qualified Data.ByteString.Char8 as Char8
 import Data.Digest.SHA1 (Word160 (Word160))
 import Data.BEncode
 import Data.BEncode.BDict hiding (map)
+import System.Endian (fromBE16, toBE16, fromBE32, toBE32)
 
 type NodeID = Word160
 
@@ -48,19 +49,19 @@ class Octets a where
 
 instance Octets Word16 where
     octets w =
-        [ fromIntegral (w `shiftR` 8)
-        , fromIntegral w
-        ]
-    fromOctets = numFromOctets . (take 2) . (`extendListWith` 0)
+        [ fromIntegral (x `shiftR` 8)
+        , fromIntegral x
+        ] where x = toBE16 w
+    fromOctets = fromBE16 . numFromOctets . (take 2) . (`extendListWith` 0)
 
 instance Octets Word32 where
     octets w =
-        [ fromIntegral (w `shiftR` 24)
-        , fromIntegral (w `shiftR` 16)
-        , fromIntegral (w `shiftR` 8)
-        , fromIntegral w
-        ]
-    fromOctets = numFromOctets . (take 4) . (`extendListWith` 0)
+        [ fromIntegral (x `shiftR` 24)
+        , fromIntegral (x `shiftR` 16)
+        , fromIntegral (x `shiftR` 8)
+        , fromIntegral x
+        ] where x = toBE32 w
+    fromOctets = fromBE32 . numFromOctets . (take 4) . (`extendListWith` 0)
 
 instance Octets Word160 where
     octets (Word160 a1 a2 a3 a4 a5)
@@ -76,14 +77,14 @@ instance Octets Word160 where
 instance Octets CompactInfo where
     octets (CompactInfo i p) = octets i ++ octets p
 
-    fromOctets bytes = CompactInfo (fromOctets $ take 32 bytes)
-                            (fromOctets $ take 16 (drop 32 bytes))
+    fromOctets bytes = CompactInfo (fromOctets $ take 4 bytes)
+                            (fromOctets $ take 2 (drop 4 bytes))
 
 instance Octets NodeInfo where
     octets (NodeInfo nId nInfo) = octets nId ++ octets nInfo
 
-    fromOctets bytes = NodeInfo (fromOctets $ take 160 bytes)
-                            (fromOctets $ drop 160 bytes)
+    fromOctets bytes = NodeInfo (fromOctets $ take 20 bytes)
+                            (fromOctets $ drop 20 bytes)
 
 octToByteString :: (Octets a) => a -> BS.ByteString
 octToByteString = BS.pack . octets
@@ -214,6 +215,12 @@ parseNodes = Nodes . (map fromByteString) . splitBytes
               | BS.null b = []
               | otherwise = BS.take 166 b : splitBytes (BS.drop 166 b)
 
+{-
+ - This implementation is not ideal for several reasons:
+ -      - 'q' and 'y' keys are never checked (perhaps too permissive)
+ -      - NodeInfo/CompactInfo never checked for length, this can lead to
+ -        us sending KPackets to someone else
+ -}
 bDictMapToMsg :: BDictMap BValue -> Either String Message
 
 --Ping Query
@@ -351,6 +358,7 @@ bDictMapToMsg (Cons e
 
 bDictMapToMsg _ = Left "KRPC message decoding error"
 
+-- TODO: Quickcheck on arbitrary KPackets
 data KPacket = KPacket
     { transactionId :: BS.ByteString
     , message       :: Message

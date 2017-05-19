@@ -41,10 +41,22 @@ word32_bytestring_bijection b = padded == (octets . word16FromOctets) b
         word16FromOctets = fromOctets :: [Word8] -> Word32
 
 word160_bytestring_bijection :: [Word8] -> Bool
-word160_bytestring_bijection b = padded == (octets . word16FromOctets) b
+word160_bytestring_bijection b = padded == (octets . word160FromOctets) b
     where
         padded = take 20 (extendListWith b 0)
-        word16FromOctets = fromOctets :: [Word8] -> Word160
+        word160FromOctets = fromOctets :: [Word8] -> Word160
+
+compactInfo_bytestring_bijection :: [Word8] -> Bool
+compactInfo_bytestring_bijection b = padded == (octets . word16FromOctets) b
+    where
+        padded = take 6 (extendListWith b 0)
+        word16FromOctets = fromOctets :: [Word8] -> CompactInfo
+
+nodeInfo_bytestring_bijection :: [Word8] -> Bool
+nodeInfo_bytestring_bijection b = padded == (octets . word16FromOctets) b
+    where
+        padded = take 26 (extendListWith b 0)
+        word16FromOctets = fromOctets :: [Word8] -> NodeInfo
 
 fmt_decodeErr :: [Word8] -> Integer -> String -> Bool
 fmt_decodeErr i code msg = fromBEncode bval == (Right $ KPacket tid (Error code msg))
@@ -193,6 +205,8 @@ tests =
         [ testProperty "ByteString to Word16 is reversable"      word16_bytestring_bijection
         , testProperty "ByteString to Word32 is reversable"      word32_bytestring_bijection
         , testProperty "ByteString to Word160 is reversable"     word160_bytestring_bijection
+        , testProperty "ByteString to CompactInfo is reversable" compactInfo_bytestring_bijection
+        , testProperty "ByteString to NodeInfo is reversable"    nodeInfo_bytestring_bijection
         ]
     , testGroup "KRPC Sanity"
         [ testProperty "decode Error Message"                    fmt_decodeErr
