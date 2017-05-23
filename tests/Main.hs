@@ -1,6 +1,3 @@
-import Bucket
-import KRPC
-
 import Test.Framework.Providers.QuickCheck2 (testProperty)
 import Test.Framework (defaultMain, testGroup, Test)
 
@@ -13,6 +10,18 @@ import Data.ByteString (pack)
 import Data.BEncode
 import Data.BEncode.BDict hiding (map)
 import Data.Digest.SHA1 (Word160)
+
+import Mainline.Bucket
+import Network.Octets (Octets (..), fromByteString)
+import Network.KRPC (KPacket (..), parseNodes)
+import Network.KRPC.Helpers (extendListWith, stringpack, bd)
+import Network.KRPC.Types (CompactInfo, NodeInfo, Message(..))
+import Network.KRPC.InternalConstants
+    ( bs_a
+    , bs_r
+    , bs_t
+    , bs_id
+    )
 
 --import Debug.Trace
 
@@ -114,7 +123,7 @@ fmt_decodeNodesResponse t i ns
                                (Nodes $ mkNodes ns))
           mkNodes :: [Word8] -> [NodeInfo]
           mkNodes [] = []
-          mkNodes xs = fromOctets (take 166 xs) : mkNodes (drop 166 xs)
+          mkNodes xs = fromOctets (take 26 xs) : mkNodes (drop 26 xs)
 
 fmt_decodeAskPeersQuery :: [Word8] -> [Word8] -> [Word8] -> Bool
 fmt_decodeAskPeersQuery t i info

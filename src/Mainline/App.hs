@@ -21,7 +21,12 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.BEncode (encode)
 import Data.Digest.SHA1 (Word160)
-import KRPC
+
+import Network.KRPC         (KPacket (..))
+import Network.KRPC.Types   (Port, CompactInfo (..), Message (..))
+import Network.KRPC.Helpers (stringpack)
+import Network.Octets       (Octets (..), fromByteString)
+import Mainline.Mainline    (Outbound)
 
 seedNodePort :: Port
 seedNodePort = 51413
@@ -60,7 +65,7 @@ sendKpacket s a k = sendTo s (toBytes k) a
 seedNodeInfo :: CompactInfo
 seedNodeInfo = CompactInfo seedNodeHost seedNodePort
 
-fireKPackets :: Socket -> [(KPacket, CompactInfo)] -> IO ()
+fireKPackets :: Socket -> Outbound -> IO ()
 fireKPackets _ [] = return ()
 fireKPackets sock ((kpacket, CompactInfo ip_ port_):xs) = do
     putStrLn $ "sending: " ++ show kpacket ++ "\n  to " ++ show addr

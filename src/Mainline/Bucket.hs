@@ -1,6 +1,6 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
-module Bucket where
+module Mainline.Bucket where
 
 import qualified Data.Map as Map
 
