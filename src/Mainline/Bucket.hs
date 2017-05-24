@@ -28,13 +28,14 @@ split rt = rt
 
 insert :: (Ord a, Integral a) => a -> v -> RoutingTable a v -> RoutingTable a v
 insert key value (Split a b)
-    | fits key a = insert key value a
-    | otherwise = insert key value b
+    | fits key a = Split (insert key value a) b
+    | otherwise = Split a (insert key value b)
 
 insert key value bucket
-    | Map.size bmap < bucketSize bucket
-        = bucket { bucketData = Map.insert key value bmap }
-    | fits (bucketId bucket) bucket
-        = insert key value $ split bucket
+    | Map.size bmap < bucketSize bucket =
+        bucket { bucketData = Map.insert key value bmap }
+    | fits (bucketId bucket) bucket =
+        insert key value $ split bucket
     | otherwise = bucket
-    where bmap = bucketData bucket
+    where
+        bmap = bucketData bucket

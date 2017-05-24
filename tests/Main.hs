@@ -31,11 +31,21 @@ prop_fits bid size bmin bmax value =
     where bucket = Bucket bid size bmin bmax Map.empty
 
 prop_size :: Word32 -> [Word32] -> Bool
-prop_size bid xs = bsize (foldr (\j b -> insert j j b) bucket (nub xs)) == len
+prop_size bid xs = sizeof (foldr (\j b -> insert j j b) bucket (nub xs)) == len
     where len = length $ nub xs
           bucket = Bucket bid len minBound maxBound Map.empty
-          bsize (Split a b) = bsize a + bsize b
-          bsize b = Map.size $ bucketData b
+          sizeof (Split a b) = sizeof a + sizeof b
+          sizeof b = Map.size $ bucketData b
+
+prop_bounds :: Word32 -> Int -> [Word32] -> Bool
+prop_bounds bid bsize xs
+    | bsize < 1 = True
+    | otherwise = bounds filledBucket == bounds bucket
+    where
+        filledBucket = foldr (\j b -> insert j j b) bucket (nub xs)
+        bounds (Split a b) = (fst $ bounds a, snd $ bounds b)
+        bounds (Bucket _ _ min_ max_ _) = (min_, max_)
+        bucket = Bucket bid bsize minBound maxBound Map.empty
 
 word16_bytestring_bijection :: [Word8] -> Bool
 word16_bytestring_bijection b = padded == (octets . word16FromOctets) b
@@ -209,6 +219,7 @@ tests =
     [ testGroup "QuickCheck Bucket"
         [ testProperty "Fits into bucket and split"              prop_fits
         , testProperty "Always store things in boundless bucket" prop_size
+        , testProperty "Insert should return same sized bucket"  prop_bounds
         ]
     , testGroup "Words Octets instance is reversable"
         [ testProperty "ByteString to Word16 is reversable"      word16_bytestring_bijection
