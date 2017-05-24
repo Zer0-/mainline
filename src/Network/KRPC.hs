@@ -106,18 +106,18 @@ msgToBDictMap (Nodes ns) =
 msgToBDictMap (AskPeers i) = singleton (stringpack "info_hash") (bEncode i)
 
 msgToBDictMap (PeersFound t (Nodes n)) =
-    singleton (stringpack "token") (toBEncode t)
-    `union` singleton (stringpack "values") (toBEncode n)
+    singleton (stringpack "token")  (toBEncode t) `union`
+    singleton (stringpack "values") (toBEncode n)
 
 msgToBDictMap (PeersFound t (Values c)) =
-    singleton (stringpack "token") (toBEncode t) `union`
+    singleton (stringpack "token")  (toBEncode t) `union`
     singleton (stringpack "values") (toBEncode c)
 
 msgToBDictMap (AnnouncePeer infohash portnum token implied_port) =
-    singleton (stringpack "info_hash") (bEncode infohash)          `union`
+    singleton (stringpack "info_hash")    (bEncode infohash)       `union`
     singleton (stringpack "implied_port") (toBEncode implied_port) `union`
-    singleton (stringpack "port") (toBEncode portnum)              `union`
-    singleton (stringpack "token") (toBEncode token)
+    singleton (stringpack "port")         (toBEncode portnum)      `union`
+    singleton (stringpack "token")        (toBEncode token)
 
 msgToBDictMap _ = undefined
 

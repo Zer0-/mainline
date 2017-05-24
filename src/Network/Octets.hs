@@ -29,7 +29,9 @@ instance Octets Word16 where
     octets w =
         [ fromIntegral (x `shiftR` 8)
         , fromIntegral x
-        ] where x = toBE16 w
+        ]
+        where x = toBE16 w
+
     fromOctets = fromBE16 . numFromOctets . (take 2) . (`extendListWith` 0)
 
 
@@ -39,13 +41,15 @@ instance Octets Word32 where
         , fromIntegral (x `shiftR` 16)
         , fromIntegral (x `shiftR` 8)
         , fromIntegral x
-        ] where x = toBE32 w
+        ]
+        where x = toBE32 w
+
     fromOctets = fromBE32 . numFromOctets . (take 4) . (`extendListWith` 0)
 
 
 instance Octets Word160 where
-    octets (Word160 a1 a2 a3 a4 a5)
-        = octets a1 ++ octets a2 ++ octets a3 ++ octets a4 ++ octets a5
+    octets (Word160 a1 a2 a3 a4 a5) =
+        octets a1 ++ octets a2 ++ octets a3 ++ octets a4 ++ octets a5
 
     fromOctets bytes = Word160 a b c d e
         where a = fromOctets $ take 4 bytes

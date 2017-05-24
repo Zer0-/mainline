@@ -24,6 +24,9 @@ type Port = Word16
 
 type Token = ByteString
 
+
+
+
 data CompactInfo = CompactInfo
     { ip    :: Word32
     , port  :: Port
@@ -33,14 +36,15 @@ data CompactInfo = CompactInfo
 instance Octets CompactInfo where
     octets (CompactInfo i p) = octets i ++ octets p
 
-    fromOctets bytes = CompactInfo (fromOctets $ take 4 bytes)
-                            (fromOctets $ take 2 (drop 4 bytes))
+    fromOctets bytes = CompactInfo ip_ port_
+        where
+            ip_   = fromOctets $ take 4 bytes
+            port_ = fromOctets $ take 2 (drop 4 bytes)
 
 
 instance Show CompactInfo where
-    show (CompactInfo i p)
-        = "CompactInfo<ip: " ++ show i
-        ++ " port: " ++ show p ++ ">"
+    show (CompactInfo i p) =
+        "CompactInfo<ip: " ++ show i ++ " port: " ++ show p ++ ">"
 
 
 instance BEncode CompactInfo where
@@ -59,8 +63,10 @@ data NodeInfo = NodeInfo
 instance Octets NodeInfo where
     octets (NodeInfo nId nInfo) = octets nId ++ octets nInfo
 
-    fromOctets bytes = NodeInfo (fromOctets $ take 20 bytes)
-                            (fromOctets $ drop 20 bytes)
+    fromOctets bytes = NodeInfo nodeId_ compactInfo_
+        where
+            nodeId_      = fromOctets $ take 20 bytes
+            compactInfo_ = fromOctets $ drop 20 bytes
 
 
 instance BEncode NodeInfo where
@@ -85,19 +91,37 @@ data Message
 
 
 instance Show Message where
-    show (Error code msg) = "Error{code: " ++ show code
-                                    ++ ", msg: " ++ show msg ++ "}"
+    show (Error code msg) =
+        "Error{"
+            ++ "code: " ++ show code ++ ", "
+            ++ "msg: "  ++ show msg
+            ++ "}"
 
-    show (Query nid msg) = "Query<from: " ++ octToString nid ++ ">{"
-                                        ++ show msg ++ "}"
-    show (Response nid msg) = "Response<from: " ++ octToString nid ++ ">{"
-                                        ++ show msg ++ "}"
+    show (Query nid msg) =
+        "Query<"
+            ++ "from: " ++ octToString nid
+            ++ ">"
+            ++ "{" ++ show msg ++ "}"
+
+    show (Response nid msg) =
+        "Response<" ++ "from: " ++ octToString nid ++ ">{"
+            ++ show msg
+            ++ "}"
+
     show (FindNode nid) = "FindNode<" ++ octToString nid ++ ">"
+
     show (Nodes ns) = "Nodes[" ++ intercalate "," (map octToString ns) ++ "]"
-    show (PeersFound t msg) = "PeersFound{token: " ++ show t ++ " " ++ show msg ++ "}"
+
+    show (PeersFound t msg) =
+        "PeersFound{token: " ++ show t ++ " " ++ show msg ++ "}"
+
     show (Values v) = "Values" ++ show v
+
     show Ping = "Ping"
+
     show _ = ""
+
+
 
 
 bEncode :: (Octets a) => a -> BValue

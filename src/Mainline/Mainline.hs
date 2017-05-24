@@ -6,9 +6,9 @@ module Mainline.Mainline
 import Network.KRPC (KPacket)
 import Network.KRPC.Types (CompactInfo)
 
-type Outbound = [(KPacket, CompactInfo)]
-
 data ServerState = Null
+
+type Outbound = [(KPacket, CompactInfo)]
 
 serverHandler :: ServerState -> Either String KPacket -> (Outbound, ServerState)
 serverHandler s (Left e) = ([], s)
