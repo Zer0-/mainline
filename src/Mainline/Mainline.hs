@@ -1,14 +1,22 @@
 module Mainline.Mainline
     ( Outbound
-    , ServerState
+    , ServerState (..)
+    , NotImplemented (..)
+    , serverHandler
     ) where
 
 import Network.KRPC (KPacket)
-import Network.KRPC.Types (CompactInfo)
+import Network.KRPC.Types (CompactInfo, Message)
+import qualified Data.Map as Map
+import Data.ByteString (ByteString)
 
-data ServerState = Null
+data NotImplemented = NotImplemented
 
-type Outbound = [(KPacket, CompactInfo)]
+data ServerState = ServerState
+    { transactionState :: Map.Map ByteString NotImplemented
+    }
 
-serverHandler :: ServerState -> Either String KPacket -> (Outbound, ServerState)
-serverHandler s (Left e) = ([], s)
+type Outbound = (CompactInfo, Either KPacket (Message, NotImplemented))
+
+serverHandler :: ServerState -> CompactInfo -> KPacket -> (ServerState, [Outbound])
+serverHandler = undefined

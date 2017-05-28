@@ -49,6 +49,8 @@ executable App
                    bytestring,
                    containers,
                    Crypto,
+                   crypto-api,
+                   DRBG,
                    network,
                    cpu
   hs-source-dirs:  src
