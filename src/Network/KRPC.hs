@@ -32,7 +32,7 @@ data KPacket = KPacket
 
 
 instance Show KPacket where
-    show (KPacket t m) = "KPacket{t:" ++ show t ++ " " ++ show m ++ "}"
+    show (KPacket t m) = "KPacket<t:" ++ show t ++ ">{" ++ show m ++ "}"
 
 
 instance BEncode KPacket where

@@ -44,7 +44,9 @@ instance Octets CompactInfo where
 
 instance Show CompactInfo where
     show (CompactInfo i p) =
-        "CompactInfo<ip: " ++ show i ++ " port: " ++ show p ++ ">"
+        "CompactInfo<" ++ ipstr ++ ":" ++ show p ++ ">"
+        where
+            ipstr = intercalate "." $ map show (octets i)
 
 
 instance BEncode CompactInfo where
