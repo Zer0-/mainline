@@ -3,7 +3,7 @@ import Test.Framework (defaultMain, testGroup, Test)
 
 import Data.List (nub)
 import Data.Word (Word32, Word16, Word8)
-import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 import Data.ByteString (pack)
 
@@ -28,24 +28,24 @@ import Network.KRPC.InternalConstants
 prop_fits :: Word32 -> Int -> Word32 -> Word32 -> Word32 -> Bool
 prop_fits bid size bmin bmax value =
     fits value bucket == fits value (split bucket)
-    where bucket = Bucket bid size bmin bmax Map.empty
+    where bucket = Bucket bid size bmin bmax Set.empty
 
 prop_size :: Word32 -> [Word32] -> Bool
-prop_size bid xs = sizeof (foldr (\j b -> insert j j b) bucket (nub xs)) == len
+prop_size bid xs = sizeof (foldr (\j b -> insert j b) bucket (nub xs)) == len
     where len = length $ nub xs
-          bucket = Bucket bid len minBound maxBound Map.empty
+          bucket = Bucket bid len minBound maxBound Set.empty
           sizeof (Split a b) = sizeof a + sizeof b
-          sizeof b = Map.size $ bucketData b
+          sizeof b = Set.size $ bucketData b
 
 prop_bounds :: Word32 -> Int -> [Word32] -> Bool
 prop_bounds bid bsize xs
     | bsize < 1 = True
     | otherwise = bounds filledBucket == bounds bucket
     where
-        filledBucket = foldr (\j b -> insert j j b) bucket (nub xs)
+        filledBucket = foldr (\j b -> insert j b) bucket (nub xs)
         bounds (Split a b) = (fst $ bounds a, snd $ bounds b)
         bounds (Bucket _ _ min_ max_ _) = (min_, max_)
-        bucket = Bucket bid bsize minBound maxBound Map.empty
+        bucket = Bucket bid bsize minBound maxBound Set.empty
 
 word16_bytestring_bijection :: [Word8] -> Bool
 word16_bytestring_bijection b = padded == (octets . word16FromOctets) b
