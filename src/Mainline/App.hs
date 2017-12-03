@@ -7,6 +7,7 @@ import Network.Socket
     , socket
 --  , sendTo
 --  , bind
+    , defaultProtocol
     , Family(AF_INET)
     , SocketType(Datagram)
     , SockAddr(..)
@@ -38,7 +39,7 @@ seedNodePort :: Port
 seedNodePort = 51413
 
 seedNodeHost :: Word32
-seedNodeHost = fromOctets [192, 168, 4, 11]
+seedNodeHost = fromOctets [192, 168, 4, 2]
 
 seedNodeInfo :: CompactInfo
 seedNodeInfo = CompactInfo seedNodeHost seedNodePort
@@ -135,7 +136,17 @@ mainloop sock state outbounds = do
 
 main :: IO ()
 main = do
-    sock <- socket AF_INET Datagram 0
-
+    sock <- socket AF_INET Datagram defaultProtocol
+    {-
+     - Note that we never bind the socket. The obvious question is
+     -          'what port are we listening on?'
+     -
+     - Apparently if we call sendTo before recvFrom the system will automatically
+     - bind the socket for us. So we still don't know what port we're listening
+     - on (should probably save that and print it).
+     -
+     - Source:
+     - https://stackoverflow.com/a/14243544
+     -}
     tid <- genTid
     mainloop sock (ServerState Map.empty) [(seedNodeInfo, Left $ KPacket tid ping)]
