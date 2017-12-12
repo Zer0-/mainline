@@ -59,8 +59,6 @@ instance Octets Word160 where
               e = fromOctets $ take 4 (drop 16 bytes)
 
 
-
-
 octToByteString :: (Octets a) => a -> BS.ByteString
 octToByteString = BS.pack . octets
 

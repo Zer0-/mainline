@@ -14,20 +14,27 @@ import Network.Socket
 --  , iNADDR_ANY
     )
 
-import Network.Socket.ByteString (sendTo, recvFrom)
-import Data.Word (Word32)
-import qualified Data.ByteString as BS
+import qualified Data.ByteString      as BS
 import qualified Data.ByteString.Lazy as BL
-import Data.BEncode (encode, decode)
-import Data.Digest.SHA1 (Word160)
-import qualified Data.Map as Map
-import Crypto.Random (newGenIO, genBytes)
-import Crypto.Random.DRBG (CtrDRBG)
+import qualified Data.Map             as Map
+import qualified Data.Set             as Set
+import Network.Socket.ByteString     (sendTo, recvFrom)
+import Data.Word                     (Word32)
+import Data.Digest.SHA1              (Word160 (..))
+import Data.BEncode                  (encode, decode)
+import Crypto.Random                 (newGenIO, genBytes)
+import Crypto.Random.DRBG            (CtrDRBG)
 
-import Network.KRPC         (KPacket (..))
-import Network.KRPC.Types   (Port, CompactInfo (..), Message (..))
-import Network.KRPC.Helpers (stringpack)
-import Network.Octets       (Octets (..), fromByteString)
+import Network.KRPC                  (KPacket (..))
+import Network.KRPC.Helpers          (stringpack)
+import Network.Octets                (Octets (..), fromByteString)
+import Mainline.Bucket               (RoutingTable (Bucket))
+import Network.KRPC.Types
+    ( Port
+    , CompactInfo (..)
+    , Message (..)
+    , NodeID
+    )
 import Mainline.Mainline
     ( ServerState (..)
     , Outbound
@@ -52,11 +59,12 @@ maxline = 2048
 tidsize :: Int
 tidsize = 128
 
+--Maximum size of a bucket in the Routing Table before it must be split
+bucketsize :: Int
+bucketsize = 8
+
 word160FromString :: String -> Word160
 word160FromString = fromByteString . stringpack
-
-ping :: Message
-ping = Query (word160FromString "hello world") Ping
 
 lazyBStoStrict :: BL.ByteString -> BS.ByteString
 lazyBStoStrict = BS.concat . BL.toChunks
@@ -127,11 +135,21 @@ mainloop sock state outbounds = do
 
     (senderInfo, kpacket) <- receive sock
 
-    putStrLn $ "RESPONSE: " ++ (show $ kpacket)
+    putStrLn $ "RECEIVED: " ++ (show $ kpacket)
         ++ " FROM: " ++ show senderInfo
 
     let (state3, outbounds2) = serverHandler state2 senderInfo kpacket
     mainloop sock state3 outbounds2
+
+
+createInitialState :: NodeID -> ServerState
+createInitialState ourNodeId = ServerState Map.empty ourNodeId rt
+    where
+        rt = Bucket ourNodeId bucketsize minword maxword Set.empty
+        minword = Word160 i i i i i
+        maxword = Word160 j j j j j
+        i = minBound :: Word32
+        j = maxBound :: Word32
 
 
 main :: IO ()
@@ -148,5 +166,15 @@ main = do
      - Source:
      - https://stackoverflow.com/a/14243544
      -}
-    tid <- genTid
-    mainloop sock (ServerState Map.empty) [(seedNodeInfo, Left $ KPacket tid ping)]
+
+    --TODO: Make one up
+    let ourNodeId = word160FromString "hello world"
+
+    let initialOutbound =
+            ( seedNodeInfo
+            , Right
+                ( Query ourNodeId Ping
+                , NotImplemented
+                )
+            )
+    mainloop sock (createInitialState ourNodeId) [initialOutbound]

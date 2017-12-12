@@ -13,9 +13,11 @@ data RoutingTable a = Bucket
     }
     | Split (RoutingTable a) (RoutingTable a)
 
+
 fits :: Ord a => a -> RoutingTable a -> Bool
 fits i (Split a b) = fits i a || fits i b
 fits i (Bucket { minKey, maxKey }) = minKey <= i && i < maxKey
+
 
 split :: Integral a => RoutingTable a -> RoutingTable a
 split (Bucket bid bsize bmin bmax bset) =
@@ -24,7 +26,9 @@ split (Bucket bid bsize bmin bmax bset) =
                     then bmin + ((bmax - bmin) `quot` 2)
                     else bmax + ((bmin - bmax) `quot` 2)
           (less, more) = Set.partition (\k -> bmin <= k && k < mid) bset
+
 split rt = rt
+
 
 insert :: (Ord a, Integral a) => a -> RoutingTable a -> RoutingTable a
 insert value (Split a b)
@@ -37,5 +41,18 @@ insert value bucket
     | fits (bucketId bucket) bucket =
         insert value $ split bucket
     | otherwise = bucket
+    where
+        bset = bucketData bucket
+
+
+willInsert :: (Ord a) => a -> RoutingTable a -> Bool
+willInsert value (Split a b)
+    | fits value a = willInsert value a
+    | otherwise = willInsert value b
+
+willInsert _ bucket
+    | Set.size bset < bucketSize bucket = True
+    | fits (bucketId bucket) bucket = True
+    | otherwise = False
     where
         bset = bucketData bucket

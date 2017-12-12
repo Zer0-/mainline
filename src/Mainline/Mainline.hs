@@ -5,10 +5,13 @@ module Mainline.Mainline
     , serverHandler
     ) where
 
-import Network.KRPC (KPacket (..))
-import Network.KRPC.Types (CompactInfo, Message (..), NodeID)
 import qualified Data.Map as Map
-import Data.ByteString (ByteString)
+import Data.ByteString    (ByteString)
+
+import Network.KRPC       (KPacket (..))
+import Network.KRPC.Types (CompactInfo, Message (..), NodeID, NodeInfo (..))
+import Mainline.Bucket    (RoutingTable, willInsert)
+import Network.KRPC.WordInstances ()
 
 data NotImplemented = NotImplemented
 
@@ -24,6 +27,8 @@ data TransactionState = TransactionState
 
 data ServerState = ServerState
     { transactionState :: Map.Map ByteString NotImplemented
+    , nodeid           :: NodeID -- Our node id
+    , routingTable     :: RoutingTable NodeID
     }
 
 -- probably should be (CompactInfo, (Either KPacket Message, NotImplemented))
@@ -39,8 +44,32 @@ type Outbound = (CompactInfo, Either KPacket (Message, NotImplemented))
 
 -- Do we need the current timestamp here too?
 serverHandler :: ServerState -> CompactInfo -> KPacket -> (ServerState, [Outbound])
-serverHandler state compactinfo (KPacket tid (Query nid msg)) =
-    undefined
+
+{-
+ - What are we doing here?
+ - What about Bucket?
+ -
+ - What are the two cases a KPacket can be?
+ -      1. A Query (Request)
+ -      2. A Response
+ -      3. Error
+ -
+ - Query    NodeID { Ping, FindNode, AskPeers, AnnouncePeer }
+ - Response NodeID { Ping, Nodes,    PeersFound Token {Values, Nodes} }
+ -
+ - Let's start by saying what we need to do for each case.
+ - Start with case of Query:
+ -
+ -}
+
+serverHandler state compactinfo (KPacket tid (Query nid Ping)) =
+    ifNewNode state nodeinfo [outbound]
+        where
+            nodeinfo = NodeInfo nid compactinfo
+            outbound =
+                ( compactinfo
+                , Left $ KPacket tid (Response (nodeid state) Ping)
+                )
 
 -- Query
 -- - This is potentially a new node
@@ -53,23 +82,6 @@ serverHandler state compactinfo (KPacket tid (Query nid msg)) =
 -- Response
 -- - update Node's last seen timestamp, set status to Good
 serverHandler state _ _ = (state, [])
-{-
- - What are we doing here?
- - What about Bucket?
- -
- - What are the two cases a KPacket can be?
- -      1. A Query (Request)
- -      2. A Response
- -      3. Error
- -
- - Query    NodeID { Ping, FindNode, AskPeers,                         AnnouncePeer }
- - Response NodeID { Ping, Nodes,    PeersFound Token {Values, Nodes}, Ping }
- -
- - Let's start by saying what we need to do for each case.
- - Start with case of Query:
- -
- -}
-
 {-
  - Before we can implement this we need to check if a nodeid falls in the range
  - of the bucket. Need to check if toInteger Word160 is correct (our NodeIds
@@ -143,3 +155,17 @@ serverHandler state _ _ = (state, [])
  - we know it's new so we need to issue a Ping first.
 pingNew :: ServerState -> CompactInfo -> NodeId -> (ServerState, [Outbound])
     | -}
+
+ifNewNode :: ServerState -> NodeInfo -> [Outbound] -> (ServerState, [Outbound])
+ifNewNode state nodeinfo outbounds
+    | (isNodeNew state nodeinfo) && (willInsert (nodeId nodeinfo) (routingTable state)) =
+        (state2, outbounds ++ outbounds2)
+    | otherwise = (state, outbounds)
+            where
+                state2 = state --TODO: insert nodeinfo into state so we know
+                --how to process on the return trip (needs transaction id
+                --and node id to confirm response from same node)
+                outbounds2 = []
+
+isNodeNew :: ServerState -> NodeInfo -> Bool
+isNodeNew _ _ = True
