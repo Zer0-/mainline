@@ -57,3 +57,13 @@ executable App
   ghc-options:     -Wall -rtsopts
   default-language: Haskell2010
   main-is:         Mainline/App.hs
+
+executable Teatime
+  build-depends:
+                   base >= 4.7 && < 5,
+                   bytestring,
+                   random
+  hs-source-dirs:  src
+  ghc-options:     -Wall -rtsopts
+  default-language: Haskell2010
+  main-is:         Architecture/Hello.hs
