@@ -69,7 +69,7 @@ word160FromString = fromByteString . stringpack
 lazyBStoStrict :: BL.ByteString -> BS.ByteString
 lazyBStoStrict = BS.concat . BL.toChunks
 
-compactInfoFromSockAddr :: SockAddr -> Maybe CompactInfo 
+compactInfoFromSockAddr :: SockAddr -> Maybe CompactInfo
 compactInfoFromSockAddr (SockAddrInet port_ host) =
     Just $ CompactInfo host (fromIntegral port_)
 compactInfoFromSockAddr _ = Nothing
