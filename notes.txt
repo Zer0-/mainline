@@ -1,0 +1,48 @@
+Notes
+
+What do we do with an added node?
+    -we give it's info in response to queries
+    -we send a queries to it
+    
+    -so an "added node" is one we have info about
+    -things like it's status, time last successful response, time sent 
+
+
+When do we "add" a node?
+    -put it in a bucket when it's good
+
+
+
+Elm type of arch?
+-data Msg =
+    NewNode
+        { info :: NodeInfo
+        , timePinged :: Integer -- or whatever
+        }
+
+-update :: Msg -> ServerState -> (ServerState, Cmd Msg)
+
+
+main =
+  Html.program
+    { init = init
+    , view = view
+    , update = update
+    , subscriptions = subscriptions
+    }
+
+data Config model msg =
+    Config
+    { init :: (model, Cmd msg)
+    , update :: msg -> model -> (model, Cmd msg)
+    , subscriptions :: model -> Sub msg
+    }
+
+run :: Config -> IO ()
+run Config { init, update, subscriptions } 
+
+
+main :: IO ()
+main = run cfg
+
+
