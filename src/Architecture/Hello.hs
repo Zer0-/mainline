@@ -1,6 +1,7 @@
 import Prelude hiding (init)
 import Architecture.TEA (Config (..), run)
 import qualified Architecture.Cmd as Cmd
+import qualified Architecture.Sub as Sub
 
 type Model = Float
 
@@ -21,7 +22,7 @@ update (Increment i) n
         )
 
 config :: Config Model Msg
-config = Config init update
+config = Config init update (\_ -> Sub.none)
 
 main :: IO ()
 main = run config

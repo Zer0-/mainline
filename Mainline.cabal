@@ -61,8 +61,14 @@ executable App
 executable Teatime
   build-depends:
                    base >= 4.7 && < 5,
+                   bencoding >= 0.4.0.0,
+                   Crypto,
+                   cpu,
+                   containers,
+                   network,
                    bytestring,
-                   random
+                   random,
+                   hashable
   hs-source-dirs:  src
   ghc-options:     -Wall -rtsopts
   default-language: Haskell2010
