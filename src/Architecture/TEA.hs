@@ -48,10 +48,13 @@ runCmds cfg =
         (model, cmd) = init cfg
 
 
-updateModelWithSubMsgs :: SubStates msg -> Config model msg -> IO (Config model msg)
+updateModelWithSubMsgs
+    :: SubStates msg
+    -> Config model msg
+    -> IO (SubStates msg, Config model msg)
 updateModelWithSubMsgs substates cfg = do
-  msgs <- readSubscriptions substates
-  return $ cfg { init = foldMsgs (update cfg) msgs (fst $ init cfg) }
+  (states_, msgs) <- readSubscriptions substates
+  return $ (states_, cfg { init = foldMsgs (update cfg) msgs (fst $ init cfg) })
 
 
 run_ :: SubStates msg -> Config model msg -> IO ()
@@ -62,7 +65,7 @@ run_ substates cfg =
 
         case Map.null subs of
             True -> return ()
-            False -> updateModelWithSubMsgs subs newcfg >>= run_ subs
+            False -> updateModelWithSubMsgs subs newcfg >>= \(s, c) -> run_ s c
 
     where
         (model, _) = init cfg
