@@ -1,3 +1,5 @@
+{-# LANGUAGE NamedFieldPuns #-}
+
 module Architecture.Internal.Sub
     ( TSub (..)
     , Sub (..)
@@ -7,7 +9,7 @@ module Architecture.Internal.Sub
     ) where
 
 import Data.Map (Map)
-import Data.Set ((\\))
+import Control.Monad (foldM)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Network.Socket
@@ -55,28 +57,59 @@ newtype Sub msg = Sub [ TSub msg ]
 
 
 updateSubscriptions :: SubStates msg -> Sub msg -> IO (SubStates msg)
-updateSubscriptions s (Sub tsubs) =
-    loadSubs s ld
+updateSubscriptions substates (Sub tsubs) = do
+    mapM_ unsub unloads
+    foldM
+        foldSubs
+        (Map.empty :: SubStates msg)
+        loads
+    --foldM (\s (k, t) -> (sub t >>= \s_ -> return $ Map.insert k s_ s)) Map.empty loads
+    -- s_ <- unloadSubs s dl
+    -- loadSubs s_ ld
 
     where
-        keys = Map.keysSet s
-        ld = filter (\t -> Set.member (hash t) (tks \\ keys)) tsubs
-        tks = Set.fromList $ map hash tsubs
+        unsub :: SubscriptionData msg -> IO ()
+        unsub (TCPDat { connectedSocket, listenSocket }) = do
+            closem connectedSocket
+            close listenSocket
 
+        sub :: TSub msg -> IO (SubscriptionData msg)
+        sub (TCP p f) = do
+            sock <- openTCPPort p
+            return $ TCPDat p sock Nothing f
 
+        unloads = substates `Map.restrictKeys` (Set.fromList tsubkeys)
+
+        foldSubs :: SubStates msg -> (Int, TSub msg) -> IO (SubStates msg)
+        foldSubs s (k, t) =
+            sub t >>= (\s_ -> (return $ Map.insert k s_ s))
+
+        --loads :: [ (Int, TSub msg) ]
+        loads =
+            filter
+                (\(k, _) -> Map.notMember k substates)
+                [(k, t) | k <- tsubkeys, t <- tsubs]
+
+        tsubkeys = map hash tsubs
+
+        -- --dl = (\t -> Set.member (hash t) (keys \\ tks))
+        -- ld = filter (\t -> Set.member (hash t) (tks \\ keys)) tsubs
+        -- ld = s `Map.difference` tsubsmap --TODO: what type should this be?
+        -- tks = Set.fromList newkeys
+        -- newkeys = map hash tsubs
+        -- tsubsmap = Map.fromList $ map (\t -> (hash t, t)) tsubs
+        -- keys = Map.keysSet s
+
+--compute difference and union at updateSubscriptions
+
+-- Map Int (TSub msg) -> IO (SubStates msg)
+{-
 loadSubs :: SubStates msg -> [ TSub msg ] -> IO (SubStates msg)
 loadSubs states [] = return states
 loadSubs states (x:xs) = do
     state <- loadSub x
     loadSubs (Map.insert (hash x) state states) xs
 
-
-hints :: AddrInfo
-hints = defaultHints
-    { addrFlags = [AI_PASSIVE]
-    , addrFamily = AF_INET
-    , addrSocketType = Stream
-    }
 
 loadSub :: TSub msg -> IO (SubscriptionData msg)
 loadSub (TCP p f) = do
@@ -85,6 +118,23 @@ loadSub (TCP p f) = do
     bind sock (addrAddress addr)
     listen sock 5
     return $ TCPDat p sock Nothing f
+-}
+
+openTCPPort :: Port -> IO Socket
+openTCPPort p = do
+    addr:_ <- getAddrInfo (Just hints) Nothing (Just $ show p)
+    sock <- socket AF_INET Stream defaultProtocol
+    bind sock (addrAddress addr)
+    listen sock 5
+    return sock
+
+    where
+        hints :: AddrInfo
+        hints = defaultHints
+            { addrFlags = [AI_PASSIVE]
+            , addrFamily = AF_INET
+            , addrSocketType = Stream
+            }
 
 
 readSubscriptions :: SubStates msg -> IO (SubStates msg, [ msg ])
@@ -105,15 +155,13 @@ readSubscriptions = readSubs . Map.elems
 
 
 readSub :: SubscriptionData msg -> IO (SubscriptionData msg, Maybe msg)
-readSub tcpdat =
+readSub (TCPDat p lsnsc cnsc f) =
     do
-        case (connectedSocket tcpdat) of
-            Just s -> close s
-            Nothing -> return ()
+        closem cnsc
 
-        (c, _) <- accept $ listenSocket tcpdat
+        (c, _) <- accept $ lsnsc
         bytes <- recvAll c
-        return (tcpdat { connectedSocket = Just c }, Just $ (handler tcpdat) $ bytes)
+        return (TCPDat p lsnsc (Just c) f, Just $ f bytes)
 
     where
         recvAll :: Socket -> IO BS.ByteString
@@ -127,3 +175,7 @@ readSub tcpdat =
             case BS.length bs of
                 0 ->  return $ result
                 _ -> recvAll_ result sock
+
+
+closem :: Maybe Socket -> IO ()
+closem = maybe (return ()) close

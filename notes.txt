@@ -46,3 +46,10 @@ main :: IO ()
 main = run cfg
 
 
+  decode Error Message: [Failed]
+*** Failed! Falsifiable (after 3 tests and 3 shrinks): 
+[]
+0
+"\31581"
+(used seed 5228145083336763597)
+
