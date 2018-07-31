@@ -106,21 +106,17 @@ openTCPPort p = do
 
 
 readSubscriptions :: SubStates msg -> IO (SubStates msg, [ msg ])
-readSubscriptions = readSubs . Map.elems
+readSubscriptions = (foldM ff (Map.empty, [])) . Map.assocs
     where
-        --TODO: use Map.map :: (a -> b) -> Map k a -> Map k b
-        readSubs :: [ SubscriptionData msg ] -> IO (SubStates msg, [ msg ])
-        readSubs [] = return (Map.empty, [])
-        readSubs (sd:xsd) = do
-            (subdata, mmsg) <- readSub sd
-            (states, msgs) <- readSubs xsd
-            return ((Map.singleton (hashsd sd) subdata) `Map.union` states, mprepend mmsg msgs)
-
-        hashsd :: SubscriptionData msg -> Int
-        hashsd t = hash $ TCP (port t) undefined
-
-        mprepend (Just x) xs = x : xs
-        mprepend Nothing xs = xs
+        ff ::
+            (SubStates msg, [ msg ]) ->
+            (Int, SubscriptionData msg) ->
+            IO (SubStates msg, [ msg ])
+        ff (states, msgs) (key, value) =
+            readSub value >>=
+                ( \(d, mmsg)
+                -> return (Map.insert key d states, maybe msgs (: msgs) mmsg)
+                )
 
 
 readSub :: SubscriptionData msg -> IO (SubscriptionData msg, Maybe msg)
@@ -129,21 +125,17 @@ readSub (TCPDat p lsnsc cnsc f) =
         closem cnsc
 
         (c, _) <- accept $ lsnsc
-        bytes <- recvAll c
+        bytes <- recvAll BS.empty c
         return (TCPDat p lsnsc (Just c) f, Just $ f bytes)
 
     where
-        recvAll :: Socket -> IO BS.ByteString
-        recvAll = recvAll_ BS.empty
-
-        recvAll_ :: BS.ByteString -> Socket -> IO BS.ByteString
-        recvAll_ bss sock = do
+        recvAll :: BS.ByteString -> Socket -> IO BS.ByteString
+        recvAll bss sock = do
             bs <- recv sock 4096
-            let result = bss `BS.append` bs
 
             case BS.length bs of
-                0 ->  return $ result
-                _ -> recvAll_ result sock
+                0 ->  return bss
+                _ -> recvAll (bss `BS.append` bs) sock
 
 
 closem :: Maybe Socket -> IO ()
