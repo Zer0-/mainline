@@ -59,13 +59,9 @@ newtype Sub msg = Sub [ TSub msg ]
 updateSubscriptions :: SubStates msg -> Sub msg -> IO (SubStates msg)
 updateSubscriptions substates (Sub tsubs) = do
     mapM_ unsub unloads
-    foldM
-        foldSubs
-        (Map.empty :: SubStates msg)
-        loads
-    --foldM (\s (k, t) -> (sub t >>= \s_ -> return $ Map.insert k s_ s)) Map.empty loads
-    -- s_ <- unloadSubs s dl
-    -- loadSubs s_ ld
+    loaded <- foldM foldSubs Map.empty loads
+    return $
+        Map.union (substates `Map.difference` unloads) loaded
 
     where
         unsub :: SubscriptionData msg -> IO ()
@@ -84,7 +80,6 @@ updateSubscriptions substates (Sub tsubs) = do
         foldSubs s (k, t) =
             sub t >>= (\s_ -> (return $ Map.insert k s_ s))
 
-        --loads :: [ (Int, TSub msg) ]
         loads =
             filter
                 (\(k, _) -> Map.notMember k substates)
@@ -92,33 +87,6 @@ updateSubscriptions substates (Sub tsubs) = do
 
         tsubkeys = map hash tsubs
 
-        -- --dl = (\t -> Set.member (hash t) (keys \\ tks))
-        -- ld = filter (\t -> Set.member (hash t) (tks \\ keys)) tsubs
-        -- ld = s `Map.difference` tsubsmap --TODO: what type should this be?
-        -- tks = Set.fromList newkeys
-        -- newkeys = map hash tsubs
-        -- tsubsmap = Map.fromList $ map (\t -> (hash t, t)) tsubs
-        -- keys = Map.keysSet s
-
---compute difference and union at updateSubscriptions
-
--- Map Int (TSub msg) -> IO (SubStates msg)
-{-
-loadSubs :: SubStates msg -> [ TSub msg ] -> IO (SubStates msg)
-loadSubs states [] = return states
-loadSubs states (x:xs) = do
-    state <- loadSub x
-    loadSubs (Map.insert (hash x) state states) xs
-
-
-loadSub :: TSub msg -> IO (SubscriptionData msg)
-loadSub (TCP p f) = do
-    addr:_ <- getAddrInfo (Just hints) Nothing (Just $ show p)
-    sock <- socket AF_INET Stream defaultProtocol
-    bind sock (addrAddress addr)
-    listen sock 5
-    return $ TCPDat p sock Nothing f
--}
 
 openTCPPort :: Port -> IO Socket
 openTCPPort p = do
@@ -140,6 +108,7 @@ openTCPPort p = do
 readSubscriptions :: SubStates msg -> IO (SubStates msg, [ msg ])
 readSubscriptions = readSubs . Map.elems
     where
+        --TODO: use Map.map :: (a -> b) -> Map k a -> Map k b
         readSubs :: [ SubscriptionData msg ] -> IO (SubStates msg, [ msg ])
         readSubs [] = return (Map.empty, [])
         readSubs (sd:xsd) = do

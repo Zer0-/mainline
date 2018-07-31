@@ -78,10 +78,14 @@ nodeInfo_bytestring_bijection b = padded == (octets . word16FromOctets) b
         word16FromOctets = fromOctets :: [Word8] -> NodeInfo
 
 fmt_decodeErr :: [Word8] -> Integer -> String -> Bool
-fmt_decodeErr i code msg = fromBEncode bval == (Right $ KPacket tid (Error code msg))
+fmt_decodeErr i code msg =
+    fromBEncode bval == (Right $ KPacket tid (Error code (stringpack msg)))
     where bval = BDict $ (singleton (stringpack "t") (BString tid))
                             `union` bd "y" "e"
-                            `union` (singleton (stringpack "e") (BList [BInteger code, BString (stringpack msg)]))
+                            `union` singleton
+                                (stringpack "e")
+                                (BList [BInteger code, BString (stringpack msg)])
+
           tid = pack i
 
 fmt_decodePingQuery :: [Word8] -> [Word8] -> Bool

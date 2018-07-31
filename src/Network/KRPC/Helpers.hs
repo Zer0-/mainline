@@ -1,6 +1,5 @@
 module Network.KRPC.Helpers
     ( extendListWith
-    , stringunpack
     , stringpack
     , bd
     ) where
@@ -18,10 +17,6 @@ extendListWith l a = l ++ [a, a..]
 
 stringpack :: String -> BS.ByteString
 stringpack = Char8.pack
-
-
-stringunpack :: BS.ByteString -> String
-stringunpack = Char8.unpack
 
 
 bd :: String -> String -> BDictMap BValue

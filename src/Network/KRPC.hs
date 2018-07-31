@@ -11,7 +11,6 @@ import Network.Octets (fromByteString, octToByteString)
 import Network.KRPC.Types (Message (..), bEncode)
 import Network.KRPC.Helpers
     ( stringpack
-    , stringunpack
     , bd
     )
 import Network.KRPC.InternalConstants
@@ -73,9 +72,9 @@ instance BEncode KPacket where
 msgToBDictMap :: Message -> BDictMap BValue
 msgToBDictMap (Error { errCode = code, errMsg = msg}) =
     bd "y" "e" `union`
-    singleton (stringpack "e") (BList elist)
+    singleton (stringpack "e") (BList errors)
     where
-        elist = [BInteger code, BString (stringpack msg)]
+        errors = [BInteger code, BString msg]
 
 msgToBDictMap (Query queryNodeId m) =
     bd "y" "q"         `union`
@@ -274,7 +273,7 @@ bDictMapToMsg (Cons e (BList ((BInteger code) : (BString msg) : []))
     |  e    == bs_e
     && y    == bs_y
     && yval == bs_e =
-        Right $ Error code (stringunpack msg)
+        Right $ Error code msg
 
 bDictMapToMsg _ = Left "KRPC message decoding error"
 

@@ -88,7 +88,7 @@ data Message
     | PeersFound Token Message
     | Values [CompactInfo]
     | AnnouncePeer InfoHash Port Token Bool -- last arg is implied_port
-    | Error { errCode :: Integer, errMsg :: String }
+    | Error { errCode :: Integer, errMsg :: ByteString }
     deriving Eq
 
 
