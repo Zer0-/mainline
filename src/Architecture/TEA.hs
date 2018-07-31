@@ -53,8 +53,8 @@ updateModelWithSubMsgs
     -> Config model msg
     -> IO (SubStates msg, Config model msg)
 updateModelWithSubMsgs substates cfg = do
-  (states_, msgs) <- readSubscriptions substates
-  return $ (states_, cfg { init = foldMsgs (update cfg) msgs (fst $ init cfg) })
+  (states, msgs) <- readSubscriptions substates
+  return $ (states, cfg { init = foldMsgs (update cfg) msgs (fst $ init cfg) })
 
 
 run_ :: SubStates msg -> Config model msg -> IO ()

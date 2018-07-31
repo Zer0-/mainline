@@ -38,7 +38,7 @@ log lvl xs = Cmd [CmdLog s]
     where
         s
             = "[" ++ (show lvl) ++ "] - "
-            ++ (intercalate ", " $ map show xs)
+            ++ (intercalate " " $ map show xs)
             ++ "\n"
 
 print :: Show a => a -> Cmd msg

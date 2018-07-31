@@ -4,7 +4,7 @@ module Architecture.Sub
     , none
     ) where
 
-import qualified Data.ByteString as BS
+import Data.ByteString (ByteString)
 import Network.KRPC.Types (Port)
 
 import Architecture.Internal.Sub
@@ -13,7 +13,7 @@ import Architecture.Internal.Sub
     )
 
 
-tcp :: Port -> (BS.ByteString -> msg) -> Sub msg
+tcp :: Port -> (ByteString -> msg) -> Sub msg
 tcp port h = Sub [ TCP port h ]
 
 none :: Sub msg

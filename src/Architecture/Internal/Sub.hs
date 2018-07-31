@@ -74,7 +74,7 @@ updateSubscriptions substates (Sub tsubs) = do
             sock <- openTCPPort p
             return $ TCPDat p sock Nothing f
 
-        unloads = substates `Map.restrictKeys` (Set.fromList tsubkeys)
+        unloads = substates `Map.withoutKeys` (Set.fromList tsubkeys)
 
         foldSubs :: SubStates msg -> (Int, TSub msg) -> IO (SubStates msg)
         foldSubs s (k, t) =
