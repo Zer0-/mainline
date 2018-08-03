@@ -15,7 +15,8 @@ import qualified Data.Set as Set
 import Network.Socket
     ( Socket
     , socket
-    , SocketType (Stream)
+    , SocketType (Stream, Datagram)
+    , SockAddr
     , Family (AF_INET)
     , AddrInfo (addrFlags, addrFamily, addrSocketType, addrAddress)
     , AddrInfoFlag (AI_PASSIVE)
@@ -27,12 +28,16 @@ import Network.Socket
     , close
     , accept
     )
-import Network.Socket.ByteString (recv)
+import Network.Socket.ByteString (recv, recvFrom)
 import Data.Hashable
 import qualified Data.ByteString as BS
 
 import Network.KRPC.Types (Port)
 
+--MAXLINE = 65507 -- Max size of a UDP datagram
+--(limited by 16 bit length part of the header field)
+maxline :: Int
+maxline = 2048
 
 data SubscriptionData msg
     = TCPDat
@@ -41,13 +46,20 @@ data SubscriptionData msg
         , connectedSocket :: Maybe Socket
         , handler :: (BS.ByteString -> msg)
         }
+    | UDPDat
+        { port :: Port
+        , boundSocket :: Socket
+        , udpHandler :: (SockAddr -> BS.ByteString -> msg)
+        }
 
 
 data TSub msg
     = TCP Port (BS.ByteString -> msg)
+    | UDP Port (SockAddr -> BS.ByteString -> msg)
 
 instance Hashable (TSub msg) where
     hashWithSalt s (TCP p _) = s `hashWithSalt` (0::Int) `hashWithSalt` p
+    hashWithSalt s (UDP p _) = s `hashWithSalt` (1::Int) `hashWithSalt` p
 
 
 type SubStates msg = Map Int (SubscriptionData msg)
@@ -69,10 +81,17 @@ updateSubscriptions substates (Sub tsubs) = do
             closem connectedSocket
             close listenSocket
 
+        unsub (UDPDat { boundSocket }) = do
+            close boundSocket
+
         sub :: TSub msg -> IO (SubscriptionData msg)
         sub (TCP p f) = do
             sock <- openTCPPort p
             return $ TCPDat p sock Nothing f
+
+        sub (UDP p f) = do
+            sock <- openUDPPort p
+            return $ UDPDat p sock f
 
         unloads = substates `Map.withoutKeys` (Set.fromList tsubkeys)
 
@@ -88,12 +107,11 @@ updateSubscriptions substates (Sub tsubs) = do
         tsubkeys = map hash tsubs
 
 
-openTCPPort :: Port -> IO Socket
-openTCPPort p = do
+bindSocket :: SocketType -> Port -> IO Socket
+bindSocket t p = do
     addr:_ <- getAddrInfo (Just hints) Nothing (Just $ show p)
-    sock <- socket AF_INET Stream defaultProtocol
+    sock <- socket AF_INET t defaultProtocol
     bind sock (addrAddress addr)
-    listen sock 5
     return sock
 
     where
@@ -101,8 +119,19 @@ openTCPPort p = do
         hints = defaultHints
             { addrFlags = [AI_PASSIVE]
             , addrFamily = AF_INET
-            , addrSocketType = Stream
+            , addrSocketType = t
             }
+
+
+openTCPPort :: Port -> IO Socket
+openTCPPort p = do
+    sock <- bindSocket Stream p
+    listen sock 5
+    return sock
+
+
+openUDPPort :: Port -> IO Socket
+openUDPPort = bindSocket Datagram
 
 
 readSubscriptions :: SubStates msg -> IO (SubStates msg, [ msg ])
@@ -136,6 +165,11 @@ readSub (TCPDat p lsnsc cnsc f) =
             case BS.length bs of
                 0 ->  return bss
                 _ -> recvAll (bss `BS.append` bs) sock
+
+readSub (UDPDat { port, boundSocket, udpHandler }) =
+    recvFrom boundSocket maxline >>=
+        (\(bs, sockaddr) ->
+            return (UDPDat port boundSocket udpHandler, Just $ udpHandler sockaddr bs))
 
 
 closem :: Maybe Socket -> IO ()
