@@ -16,7 +16,6 @@ import Architecture.Internal.Sub
     )
 import qualified Architecture.Cmd as Cmd
 
-
 data Config model msg =
     Config
     { init          :: (model, Cmd msg)
@@ -36,14 +35,14 @@ foldMsgs f (x:xs) mdl = cmd2 `merge` foldMsgs f xs mdl2
         (mdl2, cmd2) = f x mdl
 
 
-runCmds :: Config model msg -> IO (Config model msg)
-runCmds cfg =
+runCmds :: SubStates msg -> Config model msg -> IO (SubStates msg, Config model msg)
+runCmds states cfg =
     do
-       msgs <- execCmd cmd
+       (states2, msgs) <- execCmd states cmd
 
        case msgs of
-           [] -> return cfg
-           _ -> runCmds $ cfg { init = foldMsgs (update cfg) msgs model }
+           [] -> return (states2, cfg)
+           _ -> runCmds states2 $ cfg { init = foldMsgs (update cfg) msgs model }
     where
         (model, cmd) = init cfg
 
@@ -60,12 +59,12 @@ updateModelWithSubMsgs substates cfg = do
 run_ :: SubStates msg -> Config model msg -> IO ()
 run_ substates cfg =
     do
-        newcfg <- runCmds cfg
-        subs <- updateSubscriptions substates $ (subscriptions cfg) model
+        (substates2, newcfg) <- runCmds substates cfg
+        substates3 <- updateSubscriptions substates2 $ (subscriptions cfg) model
 
-        case Map.null subs of
+        case Map.null substates3 of
             True -> return ()
-            False -> updateModelWithSubMsgs subs newcfg >>= \(s, c) -> run_ s c
+            False -> updateModelWithSubMsgs substates3 newcfg >>= \(s, c) -> run_ s c
 
     where
         (model, _) = init cfg

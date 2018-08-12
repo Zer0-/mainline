@@ -4,8 +4,10 @@ module Architecture.Internal.Sub
     ( TSub (..)
     , Sub (..)
     , SubStates
+    , SubscriptionData (..)
     , updateSubscriptions
     , readSubscriptions
+    , openUDPPort
     ) where
 
 import Data.Map (Map)
@@ -93,6 +95,7 @@ updateSubscriptions substates (Sub tsubs) = do
             sock <- openUDPPort p
             return $ UDPDat p sock f
 
+        --WARN: This doesn't update exisitng subs with potentially new handlers
         unloads = substates `Map.withoutKeys` (Set.fromList tsubkeys)
 
         foldSubs :: SubStates msg -> (Int, TSub msg) -> IO (SubStates msg)

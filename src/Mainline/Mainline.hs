@@ -25,11 +25,13 @@ data TransactionState = TransactionState
     ,  compactinfo :: CompactInfo
     }
 
-data ServerState = ServerState
-    { transactionState :: Map.Map ByteString NotImplemented
-    , nodeid           :: NodeID -- Our node id
-    , routingTable     :: RoutingTable NodeID
-    }
+data ServerState
+    = Uninitialized
+    | ServerState
+        { transactionState :: Map.Map ByteString NotImplemented
+        , nodeid           :: NodeID -- Our node id
+        , routingTable     :: RoutingTable NodeID
+        }
 
 -- probably should be (CompactInfo, (Either KPacket Message, NotImplemented))
 -- above comment implies there's a case where we need to send a KPacket

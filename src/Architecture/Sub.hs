@@ -1,6 +1,7 @@
 module Architecture.Sub
     ( Sub
     , tcp
+    , udp
     , none
     ) where
 
