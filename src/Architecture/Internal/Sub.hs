@@ -46,7 +46,7 @@ data SubscriptionData msg
         { port :: Port
         , listenSocket :: Socket
         , connectedSocket :: Maybe Socket
-        , handler :: (BS.ByteString -> msg)
+        , tcpHandler :: (BS.ByteString -> msg)
         }
     | UDPDat
         { port :: Port
@@ -60,8 +60,8 @@ data TSub msg
     | UDP Port (SockAddr -> BS.ByteString -> msg)
 
 instance Hashable (TSub msg) where
-    hashWithSalt s (TCP p _) = s `hashWithSalt` (0::Int) `hashWithSalt` p
-    hashWithSalt s (UDP p _) = s `hashWithSalt` (1::Int) `hashWithSalt` p
+    hashWithSalt s (TCP p _) = s `hashWithSalt` (0 :: Int) `hashWithSalt` p
+    hashWithSalt s (UDP p _) = s `hashWithSalt` (1 :: Int) `hashWithSalt` p
 
 
 type SubStates msg = Map Int (SubscriptionData msg)
@@ -75,7 +75,9 @@ updateSubscriptions substates (Sub tsubs) = do
     mapM_ unsub unloads
     loaded <- foldM foldSubs Map.empty loads
     return $
-        Map.union (substates `Map.difference` unloads) loaded
+        Map.union
+            (updateHandlers (substates `Map.difference` unloads) tsubpairs)
+            loaded
 
     where
         unsub :: SubscriptionData msg -> IO ()
@@ -95,7 +97,6 @@ updateSubscriptions substates (Sub tsubs) = do
             sock <- openUDPPort p
             return $ UDPDat p sock f
 
-        --WARN: This doesn't update exisitng subs with potentially new handlers
         unloads = substates `Map.withoutKeys` (Set.fromList tsubkeys)
 
         foldSubs :: SubStates msg -> (Int, TSub msg) -> IO (SubStates msg)
@@ -103,11 +104,30 @@ updateSubscriptions substates (Sub tsubs) = do
             sub t >>= (\s_ -> (return $ Map.insert k s_ s))
 
         loads =
-            filter
-                (\(k, _) -> Map.notMember k substates)
-                [(k, t) | k <- tsubkeys, t <- tsubs]
+            filter (\(k, _) -> Map.notMember k substates) tsubpairs
+
+        tsubpairs = [(k, t) | k <- tsubkeys, t <- tsubs]
 
         tsubkeys = map hash tsubs
+
+updateHandlers :: SubStates msg -> [ (Int, TSub msg) ] -> SubStates msg
+updateHandlers s tsubs = foldl something Map.empty tsubs
+    where
+        something s_ (key, tsub) =
+            maybe s_ (\sub ->
+                Map.insert key (updateHandler tsub sub) s_) (Map.lookup key s)
+
+        updateHandler
+            (TCP _ f)
+            (TCPDat {port, listenSocket, connectedSocket}) =
+                TCPDat {port, listenSocket, connectedSocket, tcpHandler=f}
+
+        updateHandler
+            (UDP _ f)
+            (UDPDat {port, boundSocket}) =
+                UDPDat {port, boundSocket, udpHandler=f}
+
+        updateHandler _  _ = undefined
 
 
 bindSocket :: SocketType -> Port -> IO Socket

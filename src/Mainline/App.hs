@@ -26,9 +26,6 @@ import Network.KRPC.Types
     )
 import Mainline.Mainline
     ( ServerState (..)
-    , Outbound
-    , serverHandler
-    , NotImplemented (..)
     )
 
 seedNodePort :: Port
