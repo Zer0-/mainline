@@ -16,6 +16,8 @@ import Architecture.Internal.Sub
     )
 import qualified Architecture.Cmd as Cmd
 
+import Debug.Trace (trace)
+
 data Config model msg =
     Config
     { init          :: (model, Cmd msg)
@@ -60,14 +62,11 @@ run_ :: SubStates msg -> Config model msg -> IO ()
 run_ substates cfg =
     do
         (substates2, newcfg) <- runCmds substates cfg
-        substates3 <- updateSubscriptions substates2 $ (subscriptions cfg) model
+        substates3 <- updateSubscriptions substates2 $ (subscriptions cfg) (fst $ init newcfg)
 
-        case Map.null substates3 of
+        case Map.null (trace ("subs size: " ++ show (Map.size substates3)) substates3) of
             True -> return ()
             False -> updateModelWithSubMsgs substates3 newcfg >>= \(s, c) -> run_ s c
-
-    where
-        (model, _) = init cfg
 
 run :: Config model msg -> IO ()
 run = run_ Map.empty

@@ -51,7 +51,8 @@ execTCmd states (CmdSendUDP srcPort dest bs) =
     do
         (states2, sock) <- getSock
 
-        _ <- sendTo sock bs (ciToAddr dest) --returns bytes sent.
+        nsent <- sendTo sock bs (ciToAddr dest) --returns bytes sent.
+        putStrLn $ "bytes send: " ++ show nsent
         --TODO: something intelligent with this
 
         return (states2, Nothing)

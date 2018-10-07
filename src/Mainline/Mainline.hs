@@ -1,6 +1,9 @@
 module Mainline.Mainline
     ( Outbound
     , ServerState (..)
+    , ServerConfig (..)
+    , Action (..)
+    , TransactionState (..)
     , NotImplemented (..)
     , serverHandler
     ) where
@@ -9,27 +12,38 @@ import qualified Data.Map as Map
 import Data.ByteString    (ByteString)
 
 import Network.KRPC       (KPacket (..))
-import Network.KRPC.Types (CompactInfo, Message (..), NodeID, NodeInfo (..))
+import Network.KRPC.Types
+    ( CompactInfo
+    , Message (..)
+    , NodeID
+    , NodeInfo (..)
+    , Port
+    )
 import Mainline.Bucket    (RoutingTable, willInsert)
 import Network.KRPC.WordInstances ()
 
 data NotImplemented = NotImplemented
 
-data Action = InsertNew
+data Action = PingSeed
 
 data TransactionState = TransactionState
     {  timeSent    :: NotImplemented
     -- action to take
     ,  action      :: Action
-    -- who we're sending to
-    ,  compactinfo :: CompactInfo
+    ,  recipient   :: CompactInfo
+    }
+
+data ServerConfig = ServerConfig
+    { listenPort       :: Port
+    , seedNode         :: CompactInfo
+    , nodeid           :: NodeID -- Our node id
     }
 
 data ServerState
     = Uninitialized
     | ServerState
-        { transactionState :: Map.Map ByteString NotImplemented
-        , nodeid           :: NodeID -- Our node id
+        { transactionState :: Map.Map ByteString TransactionState
+        , conf             :: ServerConfig
         , routingTable     :: RoutingTable NodeID
         }
 
@@ -70,7 +84,7 @@ serverHandler state compactinfo (KPacket tid (Query nid Ping)) =
             nodeinfo = NodeInfo nid compactinfo
             outbound =
                 ( compactinfo
-                , Left $ KPacket tid (Response (nodeid state) Ping)
+                , Left $ KPacket tid (Response (nodeid (conf state)) Ping)
                 )
 
 -- Query

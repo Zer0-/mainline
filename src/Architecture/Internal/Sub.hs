@@ -166,9 +166,8 @@ readSubscriptions = (foldM ff (Map.empty, [])) . Map.assocs
             IO (SubStates msg, [ msg ])
         ff (states, msgs) (key, value) =
             readSub value >>=
-                ( \(d, mmsg)
-                -> return (Map.insert key d states, maybe msgs (: msgs) mmsg)
-                )
+                \(d, mmsg) ->
+                    return (Map.insert key d states, maybe msgs (: msgs) mmsg)
 
 
 readSub :: SubscriptionData msg -> IO (SubscriptionData msg, Maybe msg)
