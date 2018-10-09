@@ -7,6 +7,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map             as Map
 import qualified Data.Set             as Set
 import Data.Word                     (Word32)
+import Data.Maybe                    (isJust)
 import Data.Digest.SHA1              (Word160 (..))
 import Data.BEncode                  (encode, decode)
 
@@ -15,6 +16,7 @@ import qualified Architecture.Cmd as Cmd
 import qualified Architecture.Sub as Sub
 import Architecture.Sub (Sub)
 import Network.KRPC                  (KPacket (..))
+import Network.KRPC.Helpers          (hexify)
 import Network.Octets                (Octets (..), fromByteString)
 import Mainline.Bucket               (RoutingTable (Bucket))
 import Network.KRPC.Types
@@ -24,7 +26,7 @@ import Network.KRPC.Types
     , NodeID
     )
 import Mainline.Mainline
-    ( ServerState (..)
+    ( Model (..)
     , ServerConfig (..)
     , NotImplemented (..)
     , Action (..)
@@ -52,7 +54,7 @@ tidsize = 8
 bucketsize :: Int
 bucketsize = 8
 
-createInitialState :: NodeID -> ServerState
+createInitialState :: NodeID -> Model
 createInitialState ourNodeId =
     ServerState
         { transactionState = Map.empty
@@ -80,30 +82,28 @@ data Msg
         , newtid        :: BS.ByteString
         }
 
-init :: (ServerState, Cmd.Cmd Msg)
+init :: (Model, Cmd.Cmd Msg)
 init = (Uninitialized, Cmd.randomBytes 160 NewNodeId)
 
-update :: Msg -> ServerState -> (ServerState, Cmd.Cmd Msg)
-update (NewNodeId bs) _ = (initState, initialCmds)
+update :: Msg -> Model -> (Model, Cmd.Cmd Msg)
+-- Get new node id. Init server state, request tid for pinging seed node
+update (NewNodeId bs) Uninitialized = (initState, initialCmds)
     where
         initialCmds = Cmd.batch [ logmsg, pingSeed ]
 
         initState = createInitialState (fromByteString bs)
 
         pingSeed =
-            Cmd.randomBytes
-            tidsize
-            (\t -> SendMessage
-                { sendAction = PingSeed
-                , sendRecipient = seedNode (conf initState)
-                , body = (Query (nodeid (conf initState)) Ping)
-                , newtid = t
-                }
-            )
+            prepareMsg
+                PingSeed
+                (seedNode (conf initState))
+                (Query (nodeid (conf initState)) Ping)
 
         logmsg = Cmd.log Cmd.DEBUG
-            [ "Initializing with node id:", show bs ]
+            [ "Initializing with node id:", hexify $ BS.unpack bs ]
 
+
+-- Get tid for outound Message
 update
     (SendMessage { sendAction, sendRecipient, body, newtid })
     (ServerState { transactionState, conf, routingTable }) =
@@ -129,24 +129,82 @@ update
 
             kpacket = KPacket newtid body
 
-            sendCmd = Cmd.sendUDP (listenPort conf) sendRecipient (BL.toStrict (encode kpacket))
+            sendCmd =
+                Cmd.sendUDP
+                    (listenPort conf)
+                    sendRecipient
+                    (BL.toStrict (encode kpacket))
 
             logmsg = Cmd.log Cmd.DEBUG
                 [ "Sending ", show kpacket ]
 
+
+-- Receive a message
 update
-    (ReceiveBytes client (Just kpacket))
-    (ServerState { transactionState }) =
-        (Uninitialized, logmsg)
+    (ReceiveBytes client (Just (KPacket { transactionId, message })))
+    (ServerState { transactionState, conf, routingTable }) =
+        ( newModel
+        , Cmd.batch
+            [ Cmd.log
+                Cmd.DEBUG
+                [ "IN from " , show client
+                , " received:\n" , show KPacket { transactionId, message }
+                ]
+            , Cmd.log Cmd.DEBUG
+                [ "Transaction found in state: "
+                , show $ isJust mtState
+                ]
+            , maybe
+                Cmd.none
+                (\t -> if (recipient t) == client then
+                        Cmd.none
+                    else
+                        Cmd.log Cmd.WARNING
+                        [ "Client mismatch with state. Expected client "
+                        , show $ recipient t
+                        , " but received message from "
+                        , show client
+                        ]
+                )
+                mtState
+            , cmd
+            ]
+        )
 
         where
-            logmsg = Cmd.batch
-                [ Cmd.log Cmd.DEBUG [ "IN from ", show client, " received:\n", show kpacket ]
-                , Cmd.log Cmd.DEBUG
-                    [ "Transaction found in state: "
-                    , show $ Map.member (transactionId kpacket) transactionState
-                    ]
-                ]
+            mtState = Map.lookup transactionId transactionState
+            (newModel, cmd) = respond
+                mtState
+                ( ServerState
+                    { transactionState
+                    , conf
+                    , routingTable
+                    }
+                )
+
+
+respond :: Maybe TransactionState -> Model -> (Model, Cmd.Cmd Msg)
+respond (Just (TransactionState { action = PingSeed, recipient })) model =
+    ( model
+    , prepareMsg Warmup recipient (Query ourId (FindNode ourId))
+    )
+
+    where
+        ourId = nodeid $ conf model
+
+
+prepareMsg :: Action -> CompactInfo -> Message -> Cmd.Cmd Msg
+prepareMsg action compactinfo body =
+        Cmd.randomBytes
+        tidsize
+        (\t -> SendMessage
+            { sendAction    = action
+            , sendRecipient = compactinfo
+            , body          = body
+            , newtid        = t
+            }
+        )
+
 
 
 compactInfoFromSockAddr :: SockAddr -> CompactInfo
@@ -167,13 +225,13 @@ parseReceivedBytes fromNetinfo bytes =
         compactinfo = compactInfoFromSockAddr fromNetinfo
 
 
-subscriptions :: ServerState -> Sub Msg
+subscriptions :: Model -> Sub Msg
 subscriptions Uninitialized = Sub.none
 subscriptions (ServerState { conf = ServerConfig { listenPort } }) =
     Sub.udp listenPort parseReceivedBytes
 
 
-config :: Config ServerState Msg
+config :: Config Model Msg
 config = Config init update subscriptions
 
 

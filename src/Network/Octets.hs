@@ -1,7 +1,6 @@
 module Network.Octets
     ( Octets      (..)
     , octToByteString
-    , octToString
     , fromByteString
     ) where
 
@@ -61,10 +60,6 @@ instance Octets Word160 where
 
 octToByteString :: (Octets a) => a -> BS.ByteString
 octToByteString = BS.pack . octets
-
-
-octToString :: (Octets a) => a -> String
-octToString = show . octToByteString
 
 
 fromByteString :: (Octets a) => BS.ByteString -> a

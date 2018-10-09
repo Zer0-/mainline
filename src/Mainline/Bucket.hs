@@ -45,6 +45,8 @@ insert value bucket
         bset = bucketData bucket
 
 
+-- This can return true given a non-root RoutingTable and value
+-- that belongs outside of it's range.
 willInsert :: (Ord a) => a -> RoutingTable a -> Bool
 willInsert value (Split a b)
     | fits value a = willInsert value a

@@ -10,7 +10,7 @@ import qualified Data.Map as Map
 import Architecture.Internal.Cmd (Cmd (Cmd), execCmd)
 import Architecture.Internal.Sub
     ( SubStates
-    , Sub
+    , Sub (..)
     , updateSubscriptions
     , readSubscriptions
     )

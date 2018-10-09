@@ -14,7 +14,8 @@ import Data.List        (intercalate)
 import Data.ByteString  (ByteString)
 import Data.BEncode     (BEncode (..), BValue)
 
-import Network.Octets   (Octets (..), octToByteString, octToString)
+import Network.KRPC.Helpers (hexify)
+import Network.Octets   (Octets (..), octToByteString)
 
 type NodeID = Word160
 
@@ -44,7 +45,7 @@ instance Octets CompactInfo where
 
 instance Show CompactInfo where
     show (CompactInfo i p) =
-        "CompactInfo<" ++ ipstr ++ ":" ++ show p ++ ">"
+        "<CompactInfo " ++ ipstr ++ ":" ++ show p ++ ">"
         where
             ipstr = intercalate "." $ map show (octets i)
 
@@ -124,6 +125,8 @@ instance Show Message where
     show _ = ""
 
 
+octToString :: (Octets a) => a -> String
+octToString = hexify . octets
 
 
 bEncode :: (Octets a) => a -> BValue

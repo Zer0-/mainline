@@ -1,5 +1,3 @@
-{-# LANGUAGE ExistentialQuantification #-}
-
 module Architecture.Cmd
     ( Cmd
     , getRandom
@@ -41,12 +39,12 @@ sendUDP p dest bs = Cmd [ CmdSendUDP p dest bs ]
 
 data Loglevel = WARNING | INFO | DEBUG deriving Show
 
-log :: forall a msg. Show a => Loglevel -> [ a ] -> Cmd msg
+log :: Loglevel -> [ String ] -> Cmd msg
 log lvl xs = Cmd [CmdLog s]
     where
         s
-            = "[" ++ (show lvl) ++ "] - "
-            ++ (intercalate " " $ map show xs)
+            = show lvl ++ " - "
+            ++ (intercalate " " xs)
             ++ "\n"
 
 print :: Show a => a -> Cmd msg
