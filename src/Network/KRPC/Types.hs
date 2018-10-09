@@ -45,7 +45,7 @@ instance Octets CompactInfo where
 
 instance Show CompactInfo where
     show (CompactInfo i p) =
-        "<CompactInfo " ++ ipstr ++ ":" ++ show p ++ ">"
+        "<" ++ ipstr ++ ":" ++ show p ++ ">"
         where
             ipstr = intercalate "." $ map show (octets i)
 
@@ -61,6 +61,11 @@ data NodeInfo = NodeInfo
     { nodeId       :: NodeID
     , compactInfo  :: CompactInfo
     } deriving Eq
+
+
+instance Show NodeInfo where
+    show (NodeInfo nodeid compactinfo) =
+        "<Node " ++ hexify (octets nodeid) ++ " " ++ show compactinfo ++ ">"
 
 
 instance Octets NodeInfo where
@@ -108,7 +113,7 @@ instance Show Message where
 
     show (FindNode nid) = "<FindNode " ++ octToString nid ++ ">"
 
-    show (Nodes ns) = "<Nodes " ++ intercalate "," (map octToString ns) ++ ">"
+    show (Nodes ns) = "<Nodes " ++ intercalate "," (map show ns) ++ ">"
 
     show (PeersFound t msg) =
         "PeersFound{token: " ++ show t ++ " " ++ show msg ++ "}"
