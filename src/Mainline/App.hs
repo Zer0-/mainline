@@ -83,7 +83,7 @@ data Msg
         }
 
 init :: (Model, Cmd.Cmd Msg)
-init = (Uninitialized, Cmd.randomBytes 160 NewNodeId)
+init = (Uninitialized, Cmd.randomBytes 20 NewNodeId)
 
 update :: Msg -> Model -> (Model, Cmd.Cmd Msg)
 -- Get new node id. Init server state, request tid for pinging seed node
@@ -100,7 +100,9 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
                 (Query (nodeid (conf initState)) Ping)
 
         logmsg = Cmd.log Cmd.DEBUG
-            [ "Initializing with node id:", hexify $ BS.unpack bs ]
+            [ "Initializing with node id:"
+            , hexify $ octets (nodeid (conf initState))
+            ]
 
 
 -- Get tid for outound Message

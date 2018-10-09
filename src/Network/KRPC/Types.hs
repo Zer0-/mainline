@@ -95,25 +95,20 @@ data Message
 
 instance Show Message where
     show (Error code msg) =
-        "Error{"
-            ++ "code: " ++ show code ++ ", "
-            ++ "msg: "  ++ show msg
-            ++ "}"
+        "<Error code: " ++ show code ++ ", "
+            ++ "msg: "  ++ show msg ++ ">"
 
     show (Query nid msg) =
-        "Query<"
-            ++ "from: " ++ octToString nid
-            ++ ">"
-            ++ "{" ++ show msg ++ "}"
+        "<Query from: " ++ octToString nid
+            ++ " msg: " ++ show msg ++ ">"
 
     show (Response nid msg) =
-        "Response<" ++ "from: " ++ octToString nid ++ ">{"
-            ++ show msg
-            ++ "}"
+        "<Response from: " ++ octToString nid
+            ++ " msg: " ++ show msg ++ ">"
 
-    show (FindNode nid) = "FindNode<" ++ octToString nid ++ ">"
+    show (FindNode nid) = "<FindNode " ++ octToString nid ++ ">"
 
-    show (Nodes ns) = "Nodes[" ++ intercalate "," (map octToString ns) ++ "]"
+    show (Nodes ns) = "<Nodes " ++ intercalate "," (map octToString ns) ++ ">"
 
     show (PeersFound t msg) =
         "PeersFound{token: " ++ show t ++ " " ++ show msg ++ "}"
