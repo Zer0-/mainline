@@ -7,7 +7,7 @@ let
   f = { mkDerivation, base, bencoding, bytestring, containers
       , Crypto, HUnit, network, cpu, QuickCheck, stdenv, test-framework
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
-      , DRBG, text
+      , DRBG, text, cabal-install
       }:
       mkDerivation {
         pname = "Mainline";
@@ -23,19 +23,14 @@ let
         testHaskellDepends = [
           base bencoding bytestring containers Crypto cpu HUnit QuickCheck
           test-framework test-framework-hunit test-framework-quickcheck2
+          cabal-install
         ];
         license = stdenv.lib.licenses.gpl2;
       };
 
-  _haskellPackages = if compiler == "default"
+  haskellPackages = if compiler == "default"
                        then pkgs.haskellPackages
                        else pkgs.haskell.packages.${compiler};
-
-  haskellPackages = _haskellPackages.override {
-    overrides = self: super: {
-      bencoding = self.callPackage ../bencoding/default.nix {};
-    };
-  };
 
   drv = haskellPackages.callPackage f {};
 
