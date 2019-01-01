@@ -8,7 +8,6 @@ import qualified Data.Map             as Map
 import qualified Data.Set             as Set
 import Data.Word                     (Word32)
 import Data.Maybe                    (isJust)
-import Data.Digest.SHA1              (Word160 (..))
 import Data.BEncode                  (encode, decode)
 
 import Architecture.TEA              (Config (..), run)
@@ -18,7 +17,7 @@ import Architecture.Sub (Sub)
 import Network.KRPC                  (KPacket (..))
 import Network.KRPC.Helpers          (hexify)
 import Network.Octets                (Octets (..), fromByteString)
-import Mainline.Bucket               (RoutingTable (Bucket))
+import Mainline.RoutingTable         (initRoutingTable)
 import Network.KRPC.Types
     ( Port
     , CompactInfo (..)
@@ -32,8 +31,6 @@ import Mainline.Mainline
     , Action (..)
     , TransactionState (..)
     )
-
-import Debug.Trace (trace)
 
 servePort :: Port
 servePort = 58080
@@ -50,31 +47,22 @@ seedNodeInfo = CompactInfo seedNodeHost seedNodePort
 tidsize :: Int
 tidsize = 8
 
---Maximum size of a bucket in the Routing Table before it must be split
-bucketsize :: Int
-bucketsize = 8
-
 createInitialState :: NodeID -> Model
 createInitialState ourNodeId =
     ServerState
-        { transactionState = Map.empty
+        { transactions = Map.empty
         , conf = ServerConfig
                 { listenPort = servePort
                 , seedNode = seedNodeInfo
                 , nodeid = ourNodeId
                 }
-        , routingTable = rt
+        , routingTable = initRoutingTable ourNodeId
         }
-    where
-        rt = Bucket ourNodeId bucketsize minword maxword Set.empty
-        minword = Word160 i i i i i
-        maxword = Word160 j j j j j
-        i = minBound :: Word32
-        j = maxBound :: Word32
 
 data Msg
     = NewNodeId BS.ByteString
-    | ReceiveBytes CompactInfo (Maybe KPacket)
+    | Inbound CompactInfo KPacket
+    | ErrorParsing CompactInfo BS.ByteString
     | SendMessage
         { sendAction    :: Action
         , sendRecipient :: CompactInfo
@@ -108,9 +96,9 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
 -- Get tid for outound Message
 update
     (SendMessage { sendAction, sendRecipient, body, newtid })
-    (ServerState { transactionState, conf, routingTable }) =
+    (ServerState { transactions, conf, routingTable }) =
         ( ServerState
-            { transactionState = ts
+            { transactions = ts
             , conf
             , routingTable
             }
@@ -127,7 +115,7 @@ update
                         , recipient = sendRecipient
                         }
                     )
-                transactionState
+                transactions
 
             kpacket = KPacket newtid body
 
@@ -143,8 +131,8 @@ update
 
 -- Receive a message
 update
-    (ReceiveBytes client (Just (KPacket { transactionId, message })))
-    (ServerState { transactionState, conf, routingTable }) =
+    (Inbound client (KPacket { transactionId, message }))
+    (ServerState { transactions, conf, routingTable }) =
         ( newModel
         , Cmd.batch
             [ Cmd.log
@@ -174,11 +162,13 @@ update
         )
 
         where
-            mtState = Map.lookup transactionId transactionState
+            mtState = Map.lookup transactionId transactions
+
             (newModel, cmd) = respond
                 mtState
                 ( ServerState
-                    { transactionState
+                    { transactions =
+                        Map.delete transactionId transactions
                     , conf
                     , routingTable
                     }
@@ -219,9 +209,8 @@ compactInfoFromSockAddr _ = undefined
 parseReceivedBytes :: SockAddr -> BS.ByteString -> Msg
 parseReceivedBytes fromNetinfo bytes =
     case decode bytes of
-        Right kpacket ->
-            trace "received bytes and parsed" $ ReceiveBytes compactinfo (Just kpacket)
-        _ -> ReceiveBytes compactinfo Nothing
+        Right kpacket -> Inbound compactinfo kpacket
+        _ -> ErrorParsing compactinfo bytes
 
     where
         compactinfo = compactInfoFromSockAddr fromNetinfo

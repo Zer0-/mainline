@@ -4,22 +4,22 @@ module Mainline.Bucket where
 
 import qualified Data.Set as Set
 
-data RoutingTable a = Bucket
+data Bucket a = Bucket
     { bucketId   :: a
     , bucketSize :: Int
     , minKey     :: a
     , maxKey     :: a
     , bucketData :: Set.Set a
     }
-    | Split (RoutingTable a) (RoutingTable a)
+    | Split (Bucket a) (Bucket a)
 
 
-fits :: Ord a => a -> RoutingTable a -> Bool
+fits :: Ord a => a -> Bucket a -> Bool
 fits i (Split a b) = fits i a || fits i b
 fits i (Bucket { minKey, maxKey }) = minKey <= i && i < maxKey
 
 
-split :: Integral a => RoutingTable a -> RoutingTable a
+split :: Integral a => Bucket a -> Bucket a
 split (Bucket bid bsize bmin bmax bset) =
     Split (Bucket bid bsize bmin mid less) (Bucket bid bsize mid bmax more)
     where mid = if bmin < bmax
@@ -30,7 +30,7 @@ split (Bucket bid bsize bmin bmax bset) =
 split rt = rt
 
 
-insert :: (Ord a, Integral a) => a -> RoutingTable a -> RoutingTable a
+insert :: (Ord a, Integral a) => a -> Bucket a -> Bucket a
 insert value (Split a b)
     | fits value a = Split (insert value a) b
     | otherwise = Split a (insert value b)
@@ -45,9 +45,9 @@ insert value bucket
         bset = bucketData bucket
 
 
--- This can return true given a non-root RoutingTable and value
+-- This can return true given a non-root Bucket and value
 -- that belongs outside of it's range.
-willInsert :: (Ord a) => a -> RoutingTable a -> Bool
+willInsert :: (Ord a) => a -> Bucket a -> Bool
 willInsert value (Split a b)
     | fits value a = willInsert value a
     | otherwise = willInsert value b

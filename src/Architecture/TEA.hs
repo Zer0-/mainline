@@ -58,6 +58,11 @@ updateModelWithSubMsgs substates cfg = do
   return $ (states, cfg { init = foldMsgs (update cfg) msgs (fst $ init cfg) })
 
 
+{-
+lenSubs :: Sub msg -> Int
+lenSubs (Sub l) = length l
+-}
+
 run_ :: SubStates msg -> Config model msg -> IO ()
 run_ substates cfg =
     do

@@ -7,7 +7,7 @@ let
   f = { mkDerivation, base, bencoding, bytestring, containers
       , Crypto, HUnit, network, cpu, QuickCheck, stdenv, test-framework
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
-      , DRBG, text, cabal-install
+      , DRBG, text, time, cabal-install
       }:
       mkDerivation {
         pname = "Mainline";
@@ -18,7 +18,7 @@ let
         libraryHaskellDepends = [ base ];
         executableHaskellDepends = [
           base bencoding bytestring containers Crypto network cpu crypto-api
-          DRBG text
+          DRBG text time
         ];
         testHaskellDepends = [
           base bencoding bytestring containers Crypto cpu HUnit QuickCheck

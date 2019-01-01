@@ -24,6 +24,7 @@ library
                    Architecture.TEA
                    Mainline.Bucket
                    Mainline.Mainline
+                   Mainline.RoutingTable
                    Network.KRPC
                    Network.KRPC.Helpers
                    Network.KRPC.InternalConstants
@@ -43,6 +44,7 @@ library
                    cpu,
                    random,
                    text,
+                   time,
                    hashable
   hs-source-dirs:      src
   default-language:    Haskell2010
@@ -63,6 +65,12 @@ test-suite Main
                    test-framework >= 0.4.1,
                    test-framework-quickcheck2,
                    test-framework-hunit
+  other-modules:
+                   Network.KRPC
+                   Network.KRPC.Types
+                   Network.KRPC.Helpers
+                   Network.KRPC.InternalConstants
+                   Network.Octets
   ghc-options:     -Wall -rtsopts
   hs-source-dirs:  src, tests
   default-language: Haskell2010
@@ -81,6 +89,7 @@ executable App
                    cpu,
                    random,
                    text,
+                   time,
                    hashable
   other-modules:
                    Architecture.Cmd
@@ -90,6 +99,7 @@ executable App
                    Architecture.TEA
                    Mainline.Bucket
                    Mainline.Mainline
+                   Mainline.RoutingTable
                    Network.KRPC
                    Network.KRPC.Helpers
                    Network.KRPC.InternalConstants
@@ -121,9 +131,9 @@ executable Teatime
                    Architecture.Internal.Sub
                    Architecture.Sub
                    Architecture.TEA
-                   Network.KRPC.Helpers
-                   Network.KRPC.Types
                    Network.Octets
+                   Network.KRPC.Types
+                   Network.KRPC.Helpers
   hs-source-dirs:  src
   ghc-options:     -Wall -rtsopts
   default-language: Haskell2010
