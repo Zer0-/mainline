@@ -5,6 +5,7 @@ module Architecture.Internal.Sub
     , Sub (..)
     , SubStates
     , SubscriptionData (..)
+    , Received (..)
     , updateSubscriptions
     , readSubscriptions
     , openUDPPort
@@ -33,6 +34,7 @@ import Network.Socket
 import Network.Socket.ByteString (recv, recvFrom)
 import Data.Hashable
 import qualified Data.ByteString as BS
+import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 
 import Network.KRPC.Types (Port)
 
@@ -40,6 +42,13 @@ import Network.KRPC.Types (Port)
 --(limited by 16 bit length part of the header field)
 maxline :: Int
 maxline = 2048
+
+
+data Received = Received
+    { bytes :: BS.ByteString
+    , time  :: POSIXTime
+    }
+
 
 data SubscriptionData msg
     = TCPDat
@@ -51,13 +60,13 @@ data SubscriptionData msg
     | UDPDat
         { port :: Port
         , boundSocket :: Socket
-        , udpHandler :: (SockAddr -> BS.ByteString -> msg)
+        , udpHandler :: (SockAddr -> Received -> msg)
         }
 
 
 data TSub msg
     = TCP Port (BS.ByteString -> msg)
-    | UDP Port (SockAddr -> BS.ByteString -> msg)
+    | UDP Port (SockAddr -> Received -> msg)
 
 instance Hashable (TSub msg) where
     hashWithSalt s (TCP p _) = s `hashWithSalt` (0 :: Int) `hashWithSalt` p
@@ -188,11 +197,11 @@ readSub (TCPDat p lsnsc cnsc f) =
                 0 ->  return bss
                 _ -> recvAll (bss `BS.append` bs) sock
 
-readSub (UDPDat { port, boundSocket, udpHandler }) =
-    recvFrom boundSocket maxline >>=
-        (\(bs, sockaddr) ->
-            return (UDPDat port boundSocket udpHandler, Just $ udpHandler sockaddr bs))
+readSub (UDPDat { port, boundSocket, udpHandler }) = do
+    (bs, sockaddr) <- recvFrom boundSocket maxline
+    now <- getPOSIXTime
 
+    return (UDPDat port boundSocket udpHandler, Just $ udpHandler sockaddr (Received bs now))
 
 closem :: Maybe Socket -> IO ()
 closem = maybe (return ()) close

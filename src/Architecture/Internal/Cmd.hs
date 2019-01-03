@@ -13,6 +13,7 @@ import Crypto.Random (newGenIO, genBytes)
 import Crypto.Random.DRBG (CtrDRBG)
 import Network.Socket (SockAddr (..))
 import Network.Socket.ByteString (sendTo)
+import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
 import Architecture.Internal.Sub
@@ -25,6 +26,7 @@ import Architecture.Internal.Sub
 data TCmd msg
     = CmdLog String
     | CmdGetRandom (Float -> msg)
+    | CmdGetTime (POSIXTime -> msg)
     | CmdRandomBytes Int (BS.ByteString -> msg)
     | CmdSendUDP Port CompactInfo BS.ByteString
 
@@ -35,6 +37,9 @@ newtype Cmd msg = Cmd [ TCmd msg ]
 execTCmd :: SubStates msg -> TCmd msg -> IO (SubStates msg, Maybe msg)
 execTCmd states (CmdGetRandom f) =
     randomIO >>= \i -> return (states, Just $ f i)
+
+execTCmd states (CmdGetTime f) =
+    getPOSIXTime >>= \t -> return (states, Just $ f t)
 
 execTCmd states (CmdLog msg) = putStr msg >> return (states, Nothing)
 

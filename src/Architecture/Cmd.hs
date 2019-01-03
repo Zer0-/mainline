@@ -8,11 +8,13 @@ module Architecture.Cmd
     , log
     , print
     , sendUDP
+    , getTime
     ) where
 
 import Prelude hiding (log, print)
 import Data.List (intercalate)
 import Data.ByteString (ByteString)
+import Data.Time.Clock.POSIX (POSIXTime)
 
 import Network.KRPC.Types (Port, CompactInfo)
 
@@ -36,6 +38,8 @@ batch cmds = Cmd $ concat [t | (Cmd t) <- cmds]
 sendUDP :: Port -> CompactInfo -> ByteString -> Cmd msg
 sendUDP p dest bs = Cmd [ CmdSendUDP p dest bs ]
 
+getTime :: (POSIXTime -> msg) -> Cmd msg
+getTime f = Cmd [ CmdGetTime f ]
 
 data Loglevel = WARNING | INFO | DEBUG deriving Show
 

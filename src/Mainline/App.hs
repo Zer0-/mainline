@@ -5,29 +5,33 @@ import Network.Socket (SockAddr (..))
 import qualified Data.ByteString      as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map             as Map
-import qualified Data.Set             as Set
 import Data.Word                     (Word32)
 import Data.Maybe                    (isJust)
 import Data.BEncode                  (encode, decode)
+import Data.Time.Clock.POSIX         (POSIXTime)
 
 import Architecture.TEA              (Config (..), run)
 import qualified Architecture.Cmd as Cmd
 import qualified Architecture.Sub as Sub
-import Architecture.Sub (Sub)
+import Architecture.Sub (Sub, Received (..))
 import Network.KRPC                  (KPacket (..))
 import Network.KRPC.Helpers          (hexify)
 import Network.Octets                (Octets (..), fromByteString)
-import Mainline.RoutingTable         (initRoutingTable)
+import Mainline.RoutingTable
+    ( initRoutingTable
+    , uncheckedAdd
+    , Node (..)
+    )
 import Network.KRPC.Types
     ( Port
     , CompactInfo (..)
     , Message (..)
+    , NodeInfo (..)
     , NodeID
     )
 import Mainline.Mainline
     ( Model (..)
     , ServerConfig (..)
-    , NotImplemented (..)
     , Action (..)
     , TransactionState (..)
     )
@@ -48,21 +52,23 @@ tidsize :: Int
 tidsize = 8
 
 createInitialState :: NodeID -> Model
-createInitialState ourNodeId =
+createInitialState newNodeId =
     ServerState
         { transactions = Map.empty
         , conf = ServerConfig
                 { listenPort = servePort
                 , seedNode = seedNodeInfo
-                , nodeid = ourNodeId
+                , nodeid = newNodeId
                 }
-        , routingTable = initRoutingTable ourNodeId
+        , routingTable = initRoutingTable newNodeId
         }
 
 data Msg
     = NewNodeId BS.ByteString
-    | Inbound CompactInfo KPacket
+    | Inbound POSIXTime CompactInfo KPacket
     | ErrorParsing CompactInfo BS.ByteString
+    | GetTime Msg
+    | GotTime Msg POSIXTime
     | SendMessage
         { sendAction    :: Action
         , sendRecipient :: CompactInfo
@@ -83,9 +89,11 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
 
         pingSeed =
             prepareMsg
-                PingSeed
+                ContactSeed
                 (seedNode (conf initState))
-                (Query (nodeid (conf initState)) Ping)
+                (Query ourid (FindNode ourid))
+
+        ourid = nodeid (conf initState)
 
         logmsg = Cmd.log Cmd.DEBUG
             [ "Initializing with node id:"
@@ -93,12 +101,24 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
             ]
 
 
+update (GetTime msg) state = (state, Cmd.getTime (GotTime msg))
+
+
 -- Get tid for outound Message
 update
-    (SendMessage { sendAction, sendRecipient, body, newtid })
-    (ServerState { transactions, conf, routingTable }) =
+    ( GotTime
+        ( SendMessage
+            { sendAction
+            , sendRecipient
+            , body
+            , newtid
+            }
+        )
+        now
+    )
+    ( ServerState { transactions, conf, routingTable }) =
         ( ServerState
-            { transactions = ts
+            { transactions = trsns
             , conf
             , routingTable
             }
@@ -106,16 +126,16 @@ update
         )
 
         where
-            ts =
+            trsns =
                 Map.insert
                     newtid
                     ( TransactionState
-                        { timeSent = NotImplemented
+                        { timeSent = now
                         , action = sendAction
                         , recipient = sendRecipient
                         }
                     )
-                transactions
+                    transactions
 
             kpacket = KPacket newtid body
 
@@ -131,7 +151,7 @@ update
 
 -- Receive a message
 update
-    (Inbound client (KPacket { transactionId, message }))
+    (Inbound now client (KPacket { transactionId, message }))
     (ServerState { transactions, conf, routingTable }) =
         ( newModel
         , Cmd.batch
@@ -165,7 +185,10 @@ update
             mtState = Map.lookup transactionId transactions
 
             (newModel, cmd) = respond
+                client
                 mtState
+                now
+                message
                 ( ServerState
                     { transactions =
                         Map.delete transactionId transactions
@@ -175,21 +198,35 @@ update
                 )
 
 
-respond :: Maybe TransactionState -> Model -> (Model, Cmd.Cmd Msg)
-respond (Just (TransactionState { action = PingSeed, recipient })) model =
-    ( model
-    , prepareMsg Warmup recipient (Query ourId (FindNode ourId))
+respond
+    :: CompactInfo
+    -> Maybe TransactionState
+    -> POSIXTime
+    -> Message
+    -> Model
+    -> (Model, Cmd.Cmd Msg)
+respond
+    sender
+    ( Just
+        ( TransactionState
+            { action = ContactSeed
+            , recipient
+            }
+        )
     )
+    now
+    (Response nodeid (Nodes _))
+    (ServerState { transactions, conf, routingTable }) =
+        (ServerState transactions conf (uncheckedAdd routingTable (Node now (NodeInfo nodeid sender))), Cmd.none)
 
-    where
-        ourId = nodeid $ conf model
 
-
+-- This is used for when we want to send a message but do not have the current
+-- time.
 prepareMsg :: Action -> CompactInfo -> Message -> Cmd.Cmd Msg
 prepareMsg action compactinfo body =
         Cmd.randomBytes
         tidsize
-        (\t -> SendMessage
+        (\t -> GetTime SendMessage
             { sendAction    = action
             , sendRecipient = compactinfo
             , body          = body
@@ -206,10 +243,10 @@ compactInfoFromSockAddr (SockAddrInet port_ host) =
 compactInfoFromSockAddr _ = undefined
 
 
-parseReceivedBytes :: SockAddr -> BS.ByteString -> Msg
-parseReceivedBytes fromNetinfo bytes =
+parseReceivedBytes :: SockAddr -> Received -> Msg
+parseReceivedBytes fromNetinfo (Received { bytes, time }) =
     case decode bytes of
-        Right kpacket -> Inbound compactinfo kpacket
+        Right kpacket -> Inbound time compactinfo kpacket
         _ -> ErrorParsing compactinfo bytes
 
     where

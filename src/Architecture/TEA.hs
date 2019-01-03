@@ -21,7 +21,7 @@ import Debug.Trace (trace)
 data Config model msg =
     Config
     { init          :: (model, Cmd msg)
-    , update :: msg -> model -> (model, Cmd msg)
+    , update        :: msg -> model -> (model, Cmd msg)
     , subscriptions :: model -> Sub msg
     }
 
@@ -57,11 +57,6 @@ updateModelWithSubMsgs substates cfg = do
   (states, msgs) <- readSubscriptions substates
   return $ (states, cfg { init = foldMsgs (update cfg) msgs (fst $ init cfg) })
 
-
-{-
-lenSubs :: Sub msg -> Int
-lenSubs (Sub l) = length l
--}
 
 run_ :: SubStates msg -> Config model msg -> IO ()
 run_ substates cfg =

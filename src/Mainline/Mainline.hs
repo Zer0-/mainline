@@ -3,11 +3,11 @@ module Mainline.Mainline
     , ServerConfig (..)
     , Action (..)
     , TransactionState (..)
-    , NotImplemented (..)
     ) where
 
 import qualified Data.Map as Map
 import Data.ByteString    (ByteString)
+import Data.Time.Clock.POSIX (POSIXTime)
 
 import Network.KRPC.Types
     ( CompactInfo
@@ -17,10 +17,8 @@ import Network.KRPC.Types
 import Mainline.RoutingTable (RoutingTable)
 import Network.KRPC.WordInstances ()
 
-data NotImplemented = NotImplemented
-
 data Action
-    = PingSeed
+    = ContactSeed
     | Warmup
 
 
@@ -34,10 +32,10 @@ data Action
  -
  -  - Store nodes in ServerState in a map of NodeID -> Node ✓
  -  - [i] Combine RoutingTable and nodes map into one structure in own module ✓
- -  - Send out FindNode rather than initial Ping
+ -  - Send out FindNode rather than initial Ping ✓
  -  - Create procedure to add seed node to ServerState (routing table)
  -  - Create procedure to potentially add unknown node (replace bad one etc)
- -  - Extend Sub[.udp] to provide current time
+ -  - Extend Sub[.udp] to provide current time ✓
  -  - Timer subscription for cleaning up (transactions, questionable nodes, etc)
  -
  - MILESTONE:
@@ -47,7 +45,7 @@ data Action
 
 
 data TransactionState = TransactionState
-    {  timeSent    :: NotImplemented
+    {  timeSent    :: POSIXTime
     ,  action      :: Action
     ,  recipient   :: CompactInfo
     }

@@ -1,7 +1,10 @@
+{-# LANGUAGE NamedFieldPuns #-}
+
 module Mainline.RoutingTable
     ( Node (..)
     , RoutingTable
     , initRoutingTable
+    , uncheckedAdd
     ) where
 
 import qualified Data.Map as Map
@@ -9,18 +12,19 @@ import qualified Data.Set as Set
 import Data.Word (Word32)
 import Data.Digest.SHA1 (Word160 (..))
 import Data.Time.Clock.POSIX (POSIXTime)
+import Network.KRPC.WordInstances()
 
-import Mainline.Bucket (Bucket (Bucket))
-import Network.KRPC.Types (NodeID, CompactInfo)
---
+import Mainline.Bucket (Bucket (Bucket), insert)
+import Network.KRPC.Types (NodeID, NodeInfo (..))
+
 --Maximum size of a bucket before it must be split
 bucketsize :: Int
 bucketsize = 8
 
 
 data Node = Node
-    { timeLastMessage   :: POSIXTime
-    , info              :: CompactInfo
+    { lastMsgTime       :: POSIXTime
+    , info              :: NodeInfo
     }
 
 
@@ -28,6 +32,17 @@ data RoutingTable = RoutingTable
     { bucket :: Bucket NodeID
     , nodes :: Map.Map NodeID Node
     }
+
+
+uncheckedAdd :: RoutingTable -> Node -> RoutingTable
+uncheckedAdd (RoutingTable { bucket, nodes }) node =
+    RoutingTable
+        { bucket = insert (nodeid :: Word160) bucket
+        , nodes = Map.insert nodeid node nodes
+        }
+
+    where
+        nodeid = nodeId $ info node
 
 
 initRoutingTable :: NodeID -> RoutingTable
