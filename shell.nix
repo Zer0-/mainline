@@ -4,7 +4,7 @@ let
 
   inherit (nixpkgs) pkgs;
 
-  f = { mkDerivation, base, bencoding, bytestring, containers
+  f = { mkDerivation, base, bencoding, bytestring, containers_0_6_0_1
       , Crypto, HUnit, network, cpu, QuickCheck, stdenv, test-framework
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
       , DRBG, text, time, cabal-install
@@ -17,11 +17,11 @@ let
         isExecutable = true;
         libraryHaskellDepends = [ base ];
         executableHaskellDepends = [
-          base bencoding bytestring containers Crypto network cpu crypto-api
+          base bencoding bytestring containers_0_6_0_1 Crypto network cpu crypto-api
           DRBG text time
         ];
         testHaskellDepends = [
-          base bencoding bytestring containers Crypto cpu HUnit QuickCheck
+          base bencoding bytestring containers_0_6_0_1 Crypto cpu HUnit QuickCheck
           test-framework test-framework-hunit test-framework-quickcheck2
           cabal-install
         ];
