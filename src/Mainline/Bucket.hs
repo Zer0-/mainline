@@ -30,6 +30,19 @@ split (Bucket bid bsize bmin bmax bset) =
 split rt = rt
 
 
+find :: Ord a => a -> Bucket a -> Bucket a
+find value (Split a b)
+    | fits value a = find value a
+    | otherwise = find value b
+
+find _ b = b
+
+
+getId :: Bucket a -> a
+getId (Split a _) = getId a
+getId b = bucketId b
+
+
 insert :: (Ord a, Integral a) => a -> Bucket a -> Bucket a
 insert value (Split a b)
     | fits value a = Split (insert value a) b

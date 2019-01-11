@@ -18,9 +18,14 @@ import Network.KRPC                  (KPacket (..))
 import Network.KRPC.Helpers          (hexify)
 import Network.Octets                (Octets (..), fromByteString)
 import Mainline.RoutingTable
-    ( initRoutingTable
+    ( RoutingTable
+    , initRoutingTable
     , uncheckedAdd
     , Node (..)
+    , NodeStatus (..)
+    , exists
+    , willAdd
+    , getOwnId
     )
 import Network.KRPC.Types
     ( Port
@@ -209,7 +214,7 @@ respond
     sender
     ( Just
         ( TransactionState
-            { action = ContactSeed
+            { action = ContactSeed -- does this special case really exist?
             , recipient
             }
         )
@@ -217,7 +222,27 @@ respond
     now
     (Response nodeid (Nodes _))
     (ServerState { transactions, conf, routingTable }) =
-        (ServerState transactions conf (uncheckedAdd routingTable (Node now (NodeInfo nodeid sender))), Cmd.none)
+        (ServerState transactions conf (uncheckedAdd routingTable (Node now (NodeInfo nodeid sender) Normal)), Cmd.none)
+
+
+-- Node has not yet been contacted
+considerNode :: POSIXTime -> RoutingTable -> NodeInfo -> (RoutingTable, Cmd.Cmd Msg)
+considerNode now rt nodeinfo
+    | exists rt nodeinfo = (rt, Cmd.none)
+    | willAdd rt nodeinfo = (rt, findUs)
+        where
+            --a = --what do we need to add to the rt? Nothing!
+            findUs =
+                prepareMsg2
+                    now
+                    Warmup
+                    (compactInfo nodeinfo)
+                    (Query ourid (FindNode ourid))
+            ourid = getOwnId rt
+    -- node exists in rt => (Model, Cmd.none)
+    -- node can be added (bucket not full or ourid in bucket) => send message
+    -- if nodes where lastMsgTime < (now - 15m) || status == BeingChecked
+    --      then send command or modify TransactionState
 
 
 -- This is used for when we want to send a message but do not have the current
@@ -233,6 +258,19 @@ prepareMsg action compactinfo body =
             , newtid        = t
             }
         )
+
+prepareMsg2 :: POSIXTime -> Action -> CompactInfo -> Message -> Cmd.Cmd Msg
+prepareMsg2 now action compactinfo body =
+    Cmd.randomBytes
+    tidsize
+    (\t -> GotTime SendMessage
+        { sendAction    = action
+        , sendRecipient = compactinfo
+        , body          = body
+        , newtid        = t
+        }
+        now
+    )
 
 
 
