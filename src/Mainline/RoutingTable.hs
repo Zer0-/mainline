@@ -79,9 +79,6 @@ changeNode :: (Node -> Node) -> NodeID -> RoutingTable -> RoutingTable
 changeNode f k rt = rt { nodes = Map.adjust f k (nodes rt) }
 
 
--- there's no way to have a "checked" add operation with a node since we don't
--- yet have a lastMsgTime. So this will return Cmd (not modifying routingTable, ever?)
-
 willAdd :: RoutingTable -> NodeInfo -> Bool
 willAdd rt nodeinfo = willInsert (nodeId nodeinfo) (bucket rt)
 

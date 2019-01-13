@@ -220,16 +220,34 @@ respond
         )
     )
     now
-    (Response nodeid (Nodes _))
+    (Response nodeid (Nodes ninfos))
     (ServerState { transactions, conf, routingTable }) =
-        (ServerState transactions conf (uncheckedAdd routingTable (Node now (NodeInfo nodeid sender) Normal)), Cmd.none)
+        (ServerState transactions conf newrt, Cmd.batch cmds)
+        where
+            rt = uncheckedAdd
+                    routingTable
+                    (Node now ( NodeInfo nodeid sender) Normal)
+
+            (newrt, cmds) =
+                foldl
+                    ( \(rt_, l) nodeinfo ->
+                        (\(rt__, cmd) -> (rt__, cmd : l))
+                        (considerNode now rt_ nodeinfo)
+                    )
+                    (rt, [])
+                    ninfos
 
 
 -- Node has not yet been contacted
-considerNode :: POSIXTime -> RoutingTable -> NodeInfo -> (RoutingTable, Cmd.Cmd Msg)
+considerNode
+    :: POSIXTime
+    -> RoutingTable
+    -> NodeInfo
+    -> (RoutingTable, Cmd.Cmd Msg)
 considerNode now rt nodeinfo
     | exists rt nodeinfo = (rt, Cmd.none)
     | willAdd rt nodeinfo = (rt, findUs)
+    | otherwise = (rt, Cmd.none)
         where
             --a = --what do we need to add to the rt? Nothing!
             findUs =
