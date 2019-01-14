@@ -42,7 +42,7 @@ import Mainline.Mainline
     )
 
 servePort :: Port
-servePort = 58080
+servePort = 51412
 
 seedNodePort :: Port
 seedNodePort = 51413
@@ -94,7 +94,7 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
 
         pingSeed =
             prepareMsg
-                ContactSeed
+                Warmup
                 (seedNode (conf initState))
                 (Query ourid (FindNode ourid))
 
@@ -212,21 +212,19 @@ respond
     -> (Model, Cmd.Cmd Msg)
 respond
     sender
-    ( Just
-        ( TransactionState
-            { action = ContactSeed -- does this special case really exist?
-            , recipient
-            }
-        )
-    )
+    (Just (TransactionState { action = Warmup }))
     now
     (Response nodeid (Nodes ninfos))
-    (ServerState { transactions, conf, routingTable }) =
-        (ServerState transactions conf newrt, Cmd.batch cmds)
+    (ServerState { transactions, conf, routingTable })
+    | willAdd routingTable node =
+        (ServerState transactions conf newrt, Cmd.batch (logmsg : cmds))
+    | otherwise = (ServerState { transactions, conf, routingTable }, Cmd.none)
         where
+            logmsg = Cmd.log Cmd.INFO [ "Adding to routing table:", show node]
+            node = NodeInfo nodeid sender
             rt = uncheckedAdd
                     routingTable
-                    (Node now ( NodeInfo nodeid sender) Normal)
+                    (Node now node Normal)
 
             (newrt, cmds) =
                 foldl
@@ -249,7 +247,6 @@ considerNode now rt nodeinfo
     | willAdd rt nodeinfo = (rt, findUs)
     | otherwise = (rt, Cmd.none)
         where
-            --a = --what do we need to add to the rt? Nothing!
             findUs =
                 prepareMsg2
                     now

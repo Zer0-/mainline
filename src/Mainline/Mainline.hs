@@ -17,9 +17,7 @@ import Network.KRPC.Types
 import Mainline.RoutingTable (RoutingTable)
 import Network.KRPC.WordInstances ()
 
-data Action
-    = ContactSeed
-    | Warmup
+data Action = Warmup
 
 
 {-
