@@ -65,7 +65,7 @@ data NodeInfo = NodeInfo
 
 instance Show NodeInfo where
     show (NodeInfo nodeid compactinfo) =
-        "<Node " ++ hexify (octets nodeid) ++ " " ++ show compactinfo ++ ">"
+        "<Node " ++ showId nodeid ++ " " ++ show compactinfo ++ ">"
 
 
 instance Octets NodeInfo where
@@ -104,14 +104,14 @@ instance Show Message where
             ++ "msg: "  ++ show msg ++ ">"
 
     show (Query nid msg) =
-        "<Query from: " ++ octToString nid
+        "<Query from: " ++ showId nid
             ++ " msg: " ++ show msg ++ ">"
 
     show (Response nid msg) =
-        "<Response from: " ++ octToString nid
+        "<Response from: " ++ showId nid
             ++ " msg: " ++ show msg ++ ">"
 
-    show (FindNode nid) = "<FindNode " ++ octToString nid ++ ">"
+    show (FindNode nid) = "<FindNode " ++ showId nid ++ ">"
 
     show (Nodes ns) = "<Nodes " ++ intercalate "," (map show ns) ++ ">"
 
@@ -128,6 +128,8 @@ instance Show Message where
 octToString :: (Octets a) => a -> String
 octToString = hexify . octets
 
+showId :: Octets a => a -> String
+showId = (take 8) . octToString
 
 bEncode :: (Octets a) => a -> BValue
 bEncode = toBEncode . octToByteString

@@ -52,7 +52,7 @@ data TransactionState = TransactionState
 data ServerConfig = ServerConfig
     { listenPort       :: Port
     , seedNode         :: CompactInfo
-    , nodeid           :: NodeID -- Our node id
+    , ourId            :: NodeID
     }
 
 data Model

@@ -54,7 +54,8 @@ seedNodeInfo :: CompactInfo
 seedNodeInfo = CompactInfo seedNodeHost seedNodePort
 
 tidsize :: Int
-tidsize = 8
+tidsize = 4
+--tidsize = 8
 
 createInitialState :: NodeID -> Model
 createInitialState newNodeId =
@@ -63,7 +64,7 @@ createInitialState newNodeId =
         , conf = ServerConfig
                 { listenPort = servePort
                 , seedNode = seedNodeInfo
-                , nodeid = newNodeId
+                , ourId = newNodeId
                 }
         , routingTable = initRoutingTable newNodeId
         }
@@ -85,6 +86,16 @@ init :: (Model, Cmd.Cmd Msg)
 init = (Uninitialized, Cmd.randomBytes 20 NewNodeId)
 
 update :: Msg -> Model -> (Model, Cmd.Cmd Msg)
+-- Error Parsing
+update (ErrorParsing compactinfo bytes) model = (model, logmsg)
+    where
+        logmsg = Cmd.log Cmd.INFO
+            [ "Could not parsed received message. Sender:"
+            , show (compactinfo)
+            , "Message:"
+            , "\"" ++ (hexify $ BS.unpack bytes) ++ "\""
+            ]
+
 -- Get new node id. Init server state, request tid for pinging seed node
 update (NewNodeId bs) Uninitialized = (initState, initialCmds)
     where
@@ -96,13 +107,13 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
             prepareMsg
                 Warmup
                 (seedNode (conf initState))
-                (Query ourid (FindNode ourid))
+                (Query ourid Ping)
 
-        ourid = nodeid (conf initState)
+        ourid = ourId (conf initState)
 
         logmsg = Cmd.log Cmd.DEBUG
             [ "Initializing with node id:"
-            , hexify $ octets (nodeid (conf initState))
+            , hexify $ octets (ourId (conf initState))
             ]
 
 
@@ -151,7 +162,7 @@ update
                     (BL.toStrict (encode kpacket))
 
             logmsg = Cmd.log Cmd.DEBUG
-                [ "Sending ", show kpacket ]
+                [ "Sending", show kpacket, "to", show sendRecipient ]
 
 
 -- Receive a message
@@ -191,7 +202,7 @@ update
 
             (newModel, cmd) = respond
                 client
-                mtState
+                (maybe (Left transactionId) Right mtState)
                 now
                 message
                 ( ServerState
@@ -205,14 +216,56 @@ update
 
 respond
     :: CompactInfo
-    -> Maybe TransactionState
+    -> Either BS.ByteString TransactionState
     -> POSIXTime
     -> Message
     -> Model
     -> (Model, Cmd.Cmd Msg)
 respond
     sender
-    (Just (TransactionState { action = Warmup }))
+    (Left transactionId)
+    now
+    (Query nodeid Ping)
+    model
+    | exists (routingTable model) nodeinfo = (model, pong)
+    | willAdd (routingTable model) nodeinfo =
+        (model { routingTable = rt }, Cmd.batch [cmds, pong])
+    | otherwise = (model, pong)
+        where
+            pong =
+                Cmd.sendUDP
+                    (listenPort (conf model))
+                    sender
+                    (BL.toStrict (encode kpacket))
+
+            kpacket = KPacket transactionId (Response ourid Ping)
+            ourid = (ourId (conf model))
+            (rt, cmds) = considerNode now (routingTable model) nodeinfo
+            nodeinfo = NodeInfo nodeid sender
+
+
+respond
+    sender
+    (Right (TransactionState { action = Warmup }))
+    now
+    (Response nodeid (Ping))
+    model
+    | exists (routingTable model) (NodeInfo nodeid sender) = (model, Cmd.none)
+    | willAdd (routingTable model) (NodeInfo nodeid sender) = (model, findUs)
+    | otherwise = (model, Cmd.none)
+        where
+            findUs =
+                prepareMsg2
+                    now
+                    Warmup
+                    sender
+                    (Query ourid (FindNode ourid))
+
+            ourid = (ourId (conf model))
+
+respond
+    sender
+    (Right (TransactionState { action = Warmup }))
     now
     (Response nodeid (Nodes ninfos))
     (ServerState { transactions, conf, routingTable })
@@ -244,15 +297,15 @@ considerNode
     -> (RoutingTable, Cmd.Cmd Msg)
 considerNode now rt nodeinfo
     | exists rt nodeinfo = (rt, Cmd.none)
-    | willAdd rt nodeinfo = (rt, findUs)
+    | willAdd rt nodeinfo = (rt, pingThem)
     | otherwise = (rt, Cmd.none)
         where
-            findUs =
+            pingThem =
                 prepareMsg2
                     now
                     Warmup
                     (compactInfo nodeinfo)
-                    (Query ourid (FindNode ourid))
+                    (Query ourid Ping)
             ourid = getOwnId rt
     -- node exists in rt => (Model, Cmd.none)
     -- node can be added (bucket not full or ourid in bucket) => send message

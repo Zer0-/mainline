@@ -53,3 +53,10 @@ main = run cfg
 "\31581"
 (used seed 5228145083336763597)
 
+
+
+
+
+----- More Notes
+- If we run out of ports, we can always kill our nodes and recreate them
+with different ids to sample the space.
