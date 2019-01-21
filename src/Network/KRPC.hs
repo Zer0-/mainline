@@ -4,7 +4,7 @@ module Network.KRPC
     ) where
 
 import Data.BEncode (BValue (..), BEncode (..), decodingError)
-import Data.BEncode.BDict (BDictMap (..), singleton, union)
+import Data.BEncode.BDict (BDictMap (..), singleton, empty, union)
 import qualified Data.ByteString as BS
 
 import Network.Octets (fromByteString, octToByteString)
@@ -21,6 +21,7 @@ import Network.KRPC.InternalConstants
     , bs_r
     , bs_t
     , bs_id
+    , bs_v
     )
 import Network.KRPC.Helpers (hexify)
 
@@ -29,18 +30,23 @@ import Network.KRPC.Helpers (hexify)
 data KPacket = KPacket
     { transactionId :: BS.ByteString
     , message       :: Message
+    , version       :: Maybe BS.ByteString
     } deriving Eq
 
 
 instance Show KPacket where
-    show (KPacket t m) = "<KPacket t:" ++ hexify (BS.unpack t)
-        ++ " msg: " ++ show m ++ ">"
+    show (KPacket t m mv) =
+        "<KPacket t:" ++ hexify (BS.unpack t)
+        ++ " msg: " ++ show m
+        ++ maybe "" (\v -> " v: " ++ show v) mv
+        ++ ">"
 
 
 instance BEncode KPacket where
-    toBEncode (KPacket { transactionId = t, message = m }) =
+    toBEncode (KPacket { transactionId = t, message = m, version = mv }) =
         BDict $
-            singleton (stringpack "t") (BString t) `union`
+            singleton bs_t (BString t) `union`
+            maybe empty (\v -> singleton bs_v (BString v)) mv `union`
             (msgToBDictMap m)
 
     fromBEncode (BDict (Cons a meat
@@ -50,7 +56,7 @@ instance BEncode KPacket where
         |  t == bs_t && q == bs_q =
             case bDictMapToMsg xs of
                 Left  e -> Left e
-                Right x -> Right $ KPacket tid x
+                Right x -> Right $ KPacket tid x Nothing
             where xs = singleton a meat
                     `union` singleton q qval
                     `union` singleton y yval
@@ -62,7 +68,7 @@ instance BEncode KPacket where
         |  t == bs_t && y == bs_y  =
             case bDictMapToMsg xs of
                 Left  e -> Left e
-                Right x -> Right $ KPacket tid x
+                Right x -> Right $ KPacket tid x Nothing
             where
                 xs = singleton a meat `union`
                     singleton y yval
@@ -289,4 +295,4 @@ parseNodes = Nodes . (map fromByteString) . splitBytes
           splitBytes b
               | BS.null b = []
               | otherwise =
-                  BS.take 26 b : splitBytes (BS.drop 26 b)
+                  BS.take 6 b : splitBytes (BS.drop 6 b)

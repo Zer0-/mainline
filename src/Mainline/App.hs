@@ -1,6 +1,6 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
-import Prelude hiding (init)
+import Prelude hiding (init, log)
 import Network.Socket (SockAddr (..))
 import qualified Data.ByteString      as BS
 import qualified Data.ByteString.Lazy as BL
@@ -13,9 +13,9 @@ import Data.Time.Clock.POSIX         (POSIXTime)
 import Architecture.TEA              (Config (..), run)
 import qualified Architecture.Cmd as Cmd
 import qualified Architecture.Sub as Sub
-import Architecture.Sub (Sub, Received (..))
+import Architecture.Sub              (Sub, Received (..))
 import Network.KRPC                  (KPacket (..))
-import Network.KRPC.Helpers          (hexify)
+import Network.KRPC.Helpers          (hexify, stringpack)
 import Network.Octets                (Octets (..), fromByteString)
 import Mainline.RoutingTable
     ( RoutingTable
@@ -42,7 +42,10 @@ import Mainline.Mainline
     )
 
 servePort :: Port
-servePort = 51412
+servePort = 51416
+
+versionIdent :: Maybe BS.ByteString
+versionIdent = Just $ stringpack "ml00"
 
 seedNodePort :: Port
 seedNodePort = 51413
@@ -54,8 +57,7 @@ seedNodeInfo :: CompactInfo
 seedNodeInfo = CompactInfo seedNodeHost seedNodePort
 
 tidsize :: Int
-tidsize = 4
---tidsize = 8
+tidsize = 2
 
 createInitialState :: NodeID -> Model
 createInitialState newNodeId =
@@ -90,10 +92,10 @@ update :: Msg -> Model -> (Model, Cmd.Cmd Msg)
 update (ErrorParsing compactinfo bytes) model = (model, logmsg)
     where
         logmsg = Cmd.log Cmd.INFO
-            [ "Could not parsed received message. Sender:"
+            [ "Could not parse received message. Sender:"
             , show (compactinfo)
             , "Message:"
-            , "\"" ++ (hexify $ BS.unpack bytes) ++ "\""
+            , "\"" ++ (show bytes) ++ "\""
             ]
 
 -- Get new node id. Init server state, request tid for pinging seed node
@@ -153,28 +155,31 @@ update
                     )
                     transactions
 
-            kpacket = KPacket newtid body
+            kpacket = KPacket newtid body Nothing
 
             sendCmd =
                 Cmd.sendUDP
                     (listenPort conf)
                     sendRecipient
-                    (BL.toStrict (encode kpacket))
+                    (BL.toStrict bvalue)
+
+            bvalue = encode kpacket
 
             logmsg = Cmd.log Cmd.DEBUG
-                [ "Sending", show kpacket, "to", show sendRecipient ]
+                [ "Sending", show kpacket
+                , "(" ++ show bvalue ++ ") to", show sendRecipient ]
 
 
 -- Receive a message
 update
-    (Inbound now client (KPacket { transactionId, message }))
+    (Inbound now client (KPacket { transactionId, message, version }))
     (ServerState { transactions, conf, routingTable }) =
         ( newModel
         , Cmd.batch
             [ Cmd.log
                 Cmd.DEBUG
                 [ "IN from " , show client
-                , " received:\n" , show KPacket { transactionId, message }
+                , " received:\n" , show kpacket
                 ]
             , Cmd.log Cmd.DEBUG
                 [ "Transaction found in state: "
@@ -199,6 +204,7 @@ update
 
         where
             mtState = Map.lookup transactionId transactions
+            kpacket = KPacket { transactionId, message, version }
 
             (newModel, cmd) = respond
                 client
@@ -229,19 +235,21 @@ respond
     model
     | exists (routingTable model) nodeinfo = (model, pong)
     | willAdd (routingTable model) nodeinfo =
-        (model { routingTable = rt }, Cmd.batch [cmds, pong])
+        (model { routingTable = rt }, Cmd.batch [log, cmds, pong])
     | otherwise = (model, pong)
         where
             pong =
                 Cmd.sendUDP
                     (listenPort (conf model))
                     sender
-                    (BL.toStrict (encode kpacket))
+                    (BL.toStrict bvalue)
 
-            kpacket = KPacket transactionId (Response ourid Ping)
+            kpacket = KPacket transactionId (Response ourid Ping) Nothing
             ourid = (ourId (conf model))
             (rt, cmds) = considerNode now (routingTable model) nodeinfo
             nodeinfo = NodeInfo nodeid sender
+            log = Cmd.log Cmd.DEBUG [ "sending", show bvalue]
+            bvalue = encode kpacket
 
 
 respond
@@ -250,8 +258,8 @@ respond
     now
     (Response nodeid (Ping))
     model
-    | exists (routingTable model) (NodeInfo nodeid sender) = (model, Cmd.none)
-    | willAdd (routingTable model) (NodeInfo nodeid sender) = (model, findUs)
+    | exists rt nodeinfo = (model, Cmd.none)
+    | willAdd rt nodeinfo = (model, findUs)
     | otherwise = (model, Cmd.none)
         where
             findUs =
@@ -261,6 +269,8 @@ respond
                     sender
                     (Query ourid (FindNode ourid))
 
+            rt = routingTable model
+            nodeinfo = NodeInfo nodeid sender
             ourid = (ourId (conf model))
 
 respond

@@ -1,12 +1,4 @@
-module Network.KRPC.InternalConstants
-    ( bs_y
-    , bs_e
-    , bs_q
-    , bs_a
-    , bs_r
-    , bs_t
-    , bs_id
-    ) where
+module Network.KRPC.InternalConstants where
 
 import Data.ByteString (ByteString)
 
@@ -33,3 +25,5 @@ bs_t = stringpack "t"
 bs_id :: ByteString
 bs_id = stringpack "id"
 
+bs_v :: ByteString
+bs_v = stringpack "v"

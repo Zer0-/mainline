@@ -79,73 +79,135 @@ nodeInfo_bytestring_bijection b = padded == (octets . word16FromOctets) b
 
 fmt_decodeErr :: [Word8] -> Integer -> String -> Bool
 fmt_decodeErr i code msg =
-    fromBEncode bval == (Right $ KPacket tid (Error code (stringpack msg)))
-    where bval = BDict $ (singleton (stringpack "t") (BString tid))
-                            `union` bd "y" "e"
-                            `union` singleton
-                                (stringpack "e")
-                                (BList [BInteger code, BString (stringpack msg)])
+    fromBEncode bval == expected
+    where
+        bval =
+            BDict $ (singleton (stringpack "t") (BString tid))
+                `union` bd "y" "e"
+                `union` singleton
+                    (stringpack "e")
+                    (BList [BInteger code, BString (stringpack msg)])
 
-          tid = pack i
+        expected =
+            Right
+                ( KPacket
+                    tid
+                    (Error code (stringpack msg))
+                    Nothing
+                )
+
+        tid = pack i
 
 fmt_decodePingQuery :: [Word8] -> [Word8] -> Bool
-fmt_decodePingQuery i n = fromBEncode bval == (Right $ KPacket tid (Query (fromByteString nid) Ping))
-    where bval = BDict $ singleton bs_a (BDict (singleton bs_id (BString nid)))
-                            `union` (singleton bs_t (BString tid))
-                            `union` bd "q" "ping"
-                            `union` bd "y" "q"
-          tid = pack i
-          nid = pack n
+fmt_decodePingQuery i n = fromBEncode bval == expected
+    where
+        bval =
+            BDict $ singleton bs_a (BDict (singleton bs_id (BString nid)))
+                `union` (singleton bs_t (BString tid))
+                `union` bd "q" "ping"
+                `union` bd "y" "q"
+
+        expected =
+            ( Right
+                ( KPacket
+                    tid
+                    (Query (fromByteString nid) Ping)
+                    Nothing
+                )
+            )
+
+        tid = pack i
+        nid = pack n
 
 fmt_decodePingResponse :: [Word8] -> [Word8] -> Bool
-fmt_decodePingResponse i n = fromBEncode bval == (Right $ KPacket tid (Response (fromByteString nid) Ping))
-    where bval = BDict $ singleton bs_r (BDict (singleton bs_id (BString nid)))
-                            `union` (singleton bs_t (BString tid))
-                            `union` bd "y" "r"
-          tid = pack i
-          nid = pack n
+fmt_decodePingResponse i n = fromBEncode bval == expected
+    where
+        bval = BDict $ singleton bs_r (BDict (singleton bs_id (BString nid)))
+            `union` (singleton bs_t (BString tid))
+            `union` bd "y" "r"
+
+        expected =
+            Right
+                ( KPacket
+                    tid
+                    (Response (fromByteString nid) Ping)
+                    Nothing
+                )
+
+        tid = pack i
+        nid = pack n
 
 fmt_decodeFindNodeQuery :: [Word8] -> [Word8] -> [Word8] -> Bool
-fmt_decodeFindNodeQuery i n t = fromBEncode bval == (Right $ KPacket tid (Query (fromByteString nid) (FindNode (fromByteString target))))
-    where bval = BDict $
-                    singleton bs_a
-                        (BDict (singleton bs_id (BString nid)
-                                    `union` singleton (stringpack "target") (BString target)))
-                    `union` (singleton bs_t (BString tid))
-                    `union` bd "q" "find_node"
-                    `union` bd "y" "q"
-          tid = pack i
-          nid = pack n
-          target = pack t
+fmt_decodeFindNodeQuery i n t =
+    fromBEncode bval == expected
+
+    where
+        bval =
+            BDict $
+                singleton bs_a
+                    (BDict (singleton bs_id (BString nid)
+                        `union` singleton (stringpack "target") (BString target)))
+                `union` (singleton bs_t (BString tid))
+                `union` bd "q" "find_node"
+                `union` bd "y" "q"
+
+        expected =
+            Right
+                ( KPacket
+                    tid
+                    ( Query
+                        (fromByteString nid)
+                        (FindNode (fromByteString target))
+                    )
+                    Nothing
+                )
+
+        tid = pack i
+        nid = pack n
+        target = pack t
 
 fmt_decodeNodesResponse :: [Word8] -> [Word8] -> [Word8] -> Bool
-fmt_decodeNodesResponse t i ns
-    = fromBEncode bval == expected
-    where tid = pack t
-          nid = pack i
-          bval = BDict $
+fmt_decodeNodesResponse t i ns = fromBEncode bval == expected
+    where
+        tid = pack t
+        nid = pack i
+        bval = BDict $
             singleton bs_r (BDict $
                 singleton bs_id (BString nid)
                 `union` singleton (stringpack "nodes") (BString $ pack ns))
             `union` bd "y" "r"
             `union` singleton bs_t (BString tid)
-          expected :: Result KPacket
-          expected = (Right $
-                       KPacket tid $
-                           Response
-                               (fromByteString nid)
-                               (Nodes $ mkNodes ns))
-          mkNodes :: [Word8] -> [NodeInfo]
-          mkNodes [] = []
-          mkNodes xs = fromOctets (take 26 xs) : mkNodes (drop 26 xs)
+
+        expected :: Result KPacket
+        expected =
+            Right
+                ( KPacket
+                    tid
+                    ( Response
+                        (fromByteString nid)
+                        (Nodes $ mkNodes ns)
+                    )
+                    Nothing
+                )
+
+        mkNodes :: [Word8] -> [NodeInfo]
+        mkNodes [] = []
+        mkNodes xs = fromOctets (take 26 xs) : mkNodes (drop 26 xs)
 
 fmt_decodeAskPeersQuery :: [Word8] -> [Word8] -> [Word8] -> Bool
-fmt_decodeAskPeersQuery t i info
-    = fromBEncode bval == (Right $
-                          KPacket tid $ Query (fromByteString nid) (AskPeers $ fromOctets info))
-    where tid = pack t
-          nid = pack i
-          bval = BDict $
+fmt_decodeAskPeersQuery t i info = fromBEncode bval == expected
+    where
+        expected =
+            Right
+                ( KPacket
+                    tid
+                    (Query (fromByteString nid) (AskPeers $ fromOctets info))
+                    Nothing
+                )
+
+        tid = pack t
+        nid = pack i
+        bval = BDict $
             singleton bs_a (BDict $
                 singleton bs_id (BString nid)
                 `union` singleton (stringpack "info_hash") (BString (pack info)))
@@ -153,23 +215,39 @@ fmt_decodeAskPeersQuery t i info
             `union` bd "q" "get_peers"
             `union` singleton bs_t (BString tid)
 
-fmt_decodeFoundValuesResponse :: [Word8] -> [Word8] -> [Word8] -> [[Word8]] -> Bool
-fmt_decodeFoundValuesResponse t i token values
-    = fromBEncode bval == expected
-    where tid = pack t
-          bval = BDict $
-            singleton bs_r (BDict $
-                singleton bs_id (BString $ pack i)
-                `union` singleton (stringpack "token") (BString $ pack token)
-                `union` singleton (stringpack "values") (BList $ map (BString . pack) values))
-            `union` bd "y" "r"
-            `union` singleton bs_t (BString tid)
-          expected = (Right $ KPacket tid $
-                           Response (fromOctets i) $
-                           PeersFound (pack token) (Values $ mkValues values))
-          mkValues :: [[Word8]] -> [CompactInfo]
-          mkValues [] = []
-          mkValues (x : xs) = fromOctets x : mkValues xs
+fmt_decodeFoundValuesResponse
+    :: [Word8]
+    -> [Word8]
+    -> [Word8]
+    -> [[Word8]]
+    -> Bool
+fmt_decodeFoundValuesResponse t i token values = fromBEncode bval == expected
+    where
+        tid = pack t
+        bval = BDict $
+                singleton bs_r (BDict $
+                    singleton bs_id (BString $ pack i)
+                    `union` singleton (stringpack "token") (BString $ pack token)
+                    `union` singleton (stringpack "values") (BList $ map (BString . pack) values))
+                `union` bd "y" "r"
+                `union` singleton bs_t (BString tid)
+
+        expected =
+            Right
+                ( KPacket
+                    tid
+                    ( Response (fromOctets i)
+                        ( PeersFound
+                            (pack token)
+                            (Values $ mkValues values)
+                        )
+                    )
+                    Nothing
+                )
+
+        mkValues :: [[Word8]] -> [CompactInfo]
+        mkValues [] = []
+        mkValues (x : xs) = fromOctets x : mkValues xs
 
 fmt_decodeFoundNodesResponse :: [Word8] -> [Word8] -> [Word8] -> [Word8] -> Bool
 fmt_decodeFoundNodesResponse t i token nodes
@@ -182,9 +260,19 @@ fmt_decodeFoundNodesResponse t i token nodes
                 `union` singleton (stringpack "nodes") (BString $ pack nodes))
             `union` bd "y" "r"
             `union` singleton bs_t (BString tid)
-          expected = (Right $ KPacket tid $
-                           Response (fromOctets i) $
-                           PeersFound (pack token) (parseNodes $ pack nodes))
+          expected =
+              ( Right
+                  ( KPacket
+                      tid
+                      ( Response (fromOctets i)
+                          ( PeersFound
+                              (pack token)
+                              (parseNodes $ pack nodes)
+                          )
+                      )
+                      Nothing
+                  )
+              )
 
 fmt_decodeAnnoucePeerQuery
     :: [Word8]
@@ -195,28 +283,47 @@ fmt_decodeAnnoucePeerQuery
     -> Bool
     -> Integer
     -> Bool
-fmt_decodeAnnoucePeerQuery t i token nfo pval impliedPortArg impliedPortVal
-    = fromBEncode bval == expected
-    where tid = pack t
-          bval = BDict $
-            singleton bs_a (BDict $
-                singleton bs_id (BString $ pack i)
-                `union` impliedPort
-                `union` singleton (stringpack "info_hash") (BString $ pack nfo)
-                `union` singleton (stringpack "port") (BString $ pack pval)
-                `union` singleton (stringpack "token") (BString $ pack token))
-            `union` bd "q" "announce_peer"
-            `union` bd "y" "q"
-            `union` singleton bs_t (BString tid)
-          expected = (Right $ KPacket tid $
-                           Query (fromOctets i) $
-                               AnnouncePeer (fromOctets nfo)
-                                            (fromOctets pval)
-                                            (pack token)
-                                            (impliedPortArg == True && impliedPortVal == 1))
-          impliedPort = if impliedPortArg
-                            then singleton (stringpack "implied_port") (BInteger impliedPortVal)
-                            else empty
+fmt_decodeAnnoucePeerQuery
+    t
+    i
+    token
+    nfo
+    pval
+    impliedPortArg
+    impliedPortVal = fromBEncode bval == expected
+        where
+            tid = pack t
+            bval = BDict $
+                singleton bs_a (BDict $
+                    singleton bs_id (BString $ pack i)
+                    `union` impliedPort
+                    `union` singleton (stringpack "info_hash") (BString $ pack nfo)
+                    `union` singleton (stringpack "port") (BString $ pack pval)
+                    `union` singleton (stringpack "token") (BString $ pack token))
+                `union` bd "q" "announce_peer"
+                `union` bd "y" "q"
+                `union` singleton bs_t (BString tid)
+
+            expected =
+                Right
+                    ( KPacket
+                        tid
+                        ( Query (fromOctets i)
+                            ( AnnouncePeer
+                                (fromOctets nfo)
+                                (fromOctets pval)
+                                (pack token)
+                                (impliedPortArg == True && impliedPortVal == 1)
+                            )
+                        )
+                        Nothing
+                    )
+
+            impliedPort =
+                if impliedPortArg then
+                    singleton (stringpack "implied_port") (BInteger impliedPortVal)
+                else
+                    empty
 
 tests :: [Test]
 tests =
