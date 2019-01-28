@@ -56,13 +56,14 @@ execTCmd states (CmdSendUDP srcPort dest bs) =
     do
         (states2, sock) <- getSock
 
-        nsent <- sendTo sock bs (ciToAddr dest) --returns bytes sent.
-        putStrLn $ "bytes send: " ++ show nsent
+        nsent <- sendTo sock bs sockaddr --returns bytes sent.
+        putStrLn $ "bytes sent: " ++ show nsent ++ " to: " ++ show sockaddr
         --TODO: something intelligent with this
 
         return (states2, Nothing)
 
         where
+            sockaddr = ciToAddr dest
             ciToAddr :: CompactInfo -> SockAddr
             ciToAddr (CompactInfo ip p) =
                 SockAddrInet (fromIntegral p) ip

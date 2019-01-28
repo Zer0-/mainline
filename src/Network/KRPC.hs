@@ -22,6 +22,7 @@ import Network.KRPC.InternalConstants
     , bs_t
     , bs_id
     , bs_v
+    , bs_ip
     )
 import Network.KRPC.Helpers (hexify)
 
@@ -49,6 +50,7 @@ instance BEncode KPacket where
             maybe empty (\v -> singleton bs_v (BString v)) mv `union`
             (msgToBDictMap m)
 
+    -- Parse query KPacket
     fromBEncode (BDict (Cons a meat
                        (Cons q qval
                        (Cons t (BString tid)
@@ -62,10 +64,50 @@ instance BEncode KPacket where
                     `union` singleton y yval
 
 
+    -- Parse response KPacket
     fromBEncode (BDict (Cons a meat
                        (Cons t (BString tid)
                        (Cons y yval Nil))))
         |  t == bs_t && y == bs_y  =
+            case bDictMapToMsg xs of
+                Left  e -> Left e
+                Right x -> Right $ KPacket tid x Nothing
+            where
+                xs = singleton a meat `union`
+                    singleton y yval
+
+    -- Parse response KPacket containing version key
+    fromBEncode
+        ( BDict
+            ( Cons a meat
+                ( Cons t (BString tid)
+                    ( Cons v (BString vs)
+                        ( Cons y yval Nil )
+                    )
+                )
+            )
+        )
+        |  v == bs_v && t == bs_t && y == bs_y  =
+            case bDictMapToMsg xs of
+                Left  e -> Left e
+                Right x -> Right $ KPacket tid x (Just vs)
+            where
+                xs = singleton a meat `union`
+                    singleton y yval
+
+    -- Parse response KPacket containing ip key
+    -- (returned by certain bootstrap nodes)
+    fromBEncode
+        ( BDict
+            ( Cons i _
+                ( Cons a meat
+                    ( Cons t (BString tid)
+                        ( Cons y yval Nil )
+                    )
+                )
+            )
+        )
+        |  i == bs_ip && t == bs_t && y == bs_y  =
             case bDictMapToMsg xs of
                 Left  e -> Left e
                 Right x -> Right $ KPacket tid x Nothing
@@ -295,4 +337,4 @@ parseNodes = Nodes . (map fromByteString) . splitBytes
           splitBytes b
               | BS.null b = []
               | otherwise =
-                  BS.take 6 b : splitBytes (BS.drop 6 b)
+                  BS.take 26 b : splitBytes (BS.drop 26 b)

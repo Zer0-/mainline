@@ -41,6 +41,8 @@ import Mainline.Mainline
     , TransactionState (..)
     )
 
+import Debug.Trace (traceShowId)
+
 servePort :: Port
 servePort = 51416
 
@@ -48,10 +50,13 @@ versionIdent :: Maybe BS.ByteString
 versionIdent = Just $ stringpack "ml00"
 
 seedNodePort :: Port
-seedNodePort = 51413
+seedNodePort = 6881
+--seedNodePort = 51413
 
 seedNodeHost :: Word32
-seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
+seedNodeHost = fromOctets [ 82, 221, 103, 244 ]
+--seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
+--seedNodeHost = fromOctets [ 67, 215, 246, 10 ]
 
 seedNodeInfo :: CompactInfo
 seedNodeInfo = CompactInfo seedNodeHost seedNodePort
@@ -140,7 +145,7 @@ update
             , conf
             , routingTable
             }
-        , Cmd.batch [ logmsg, sendCmd ]
+        , Cmd.batch [ logmsg, log2, sendCmd ]
         )
 
         where
@@ -169,6 +174,8 @@ update
                 [ "Sending", show kpacket
                 , "(" ++ show bvalue ++ ") to", show sendRecipient ]
 
+            log2 = Cmd.log Cmd.DEBUG [ "tid size:", show $ BS.length $ newtid]
+
 
 -- Receive a message
 update
@@ -180,6 +187,7 @@ update
                 Cmd.DEBUG
                 [ "IN from " , show client
                 , " received:\n" , show kpacket
+                , "(" ++ show (encode kpacket) ++ ")"
                 ]
             , Cmd.log Cmd.DEBUG
                 [ "Transaction found in state: "
@@ -227,6 +235,7 @@ respond
     -> Message
     -> Model
     -> (Model, Cmd.Cmd Msg)
+-- Respond to Ping
 respond
     sender
     (Left transactionId)
@@ -252,6 +261,7 @@ respond
             bvalue = encode kpacket
 
 
+-- Respond to Ping Response during Warmup
 respond
     sender
     (Right (TransactionState { action = Warmup }))
@@ -296,7 +306,7 @@ respond
                         (considerNode now rt_ nodeinfo)
                     )
                     (rt, [])
-                    ninfos
+                    (take 1 ninfos)
 
 
 -- Node has not yet been contacted
@@ -361,7 +371,7 @@ compactInfoFromSockAddr _ = undefined
 
 parseReceivedBytes :: SockAddr -> Received -> Msg
 parseReceivedBytes fromNetinfo (Received { bytes, time }) =
-    case decode bytes of
+    case decode (traceShowId bytes) of
         Right kpacket -> Inbound time compactinfo kpacket
         _ -> ErrorParsing compactinfo bytes
 

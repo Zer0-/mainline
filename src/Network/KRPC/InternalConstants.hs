@@ -27,3 +27,6 @@ bs_id = stringpack "id"
 
 bs_v :: ByteString
 bs_v = stringpack "v"
+
+bs_ip :: ByteString
+bs_ip = stringpack "ip"
