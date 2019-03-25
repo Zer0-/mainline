@@ -20,6 +20,7 @@ library
                    Architecture.Cmd
                    Architecture.Internal.Cmd
                    Architecture.Internal.Sub
+                   Architecture.Internal.Types
                    Architecture.Sub
                    Architecture.TEA
                    Mainline.Bucket
@@ -96,6 +97,7 @@ executable App
                    Architecture.Cmd
                    Architecture.Internal.Cmd
                    Architecture.Internal.Sub
+                   Architecture.Internal.Types
                    Architecture.Sub
                    Architecture.TEA
                    Mainline.Bucket
@@ -133,6 +135,7 @@ executable SendUDPHello
                    Architecture.TEA
                    Architecture.Internal.Cmd
                    Architecture.Internal.Sub
+                   Architecture.Internal.Types
                    Network.KRPC.Helpers
                    Network.KRPC.Types
                    Network.Octets
@@ -160,6 +163,7 @@ executable Teatime
                    Architecture.Cmd
                    Architecture.Internal.Cmd
                    Architecture.Internal.Sub
+                   Architecture.Internal.Types
                    Architecture.Sub
                    Architecture.TEA
                    Network.Octets

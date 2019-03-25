@@ -82,15 +82,34 @@ data Msg
     | ErrorParsing CompactInfo BS.ByteString
     | GetTime Msg
     | GotTime Msg POSIXTime
+    | GotEm KPacket
     | SendMessage
         { sendAction    :: Action
         , sendRecipient :: CompactInfo
         , body          :: Message
         , newtid        :: BS.ByteString
+        , fileindex     :: Int
         }
 
+
+savedDataRoot :: String
+savedDataRoot = "/home/phil/Documents/python/dht_test/dht_out/"
+
+writeDataRoot :: String
+writeDataRoot = "/tmp/dht_out2/"
+
+idFile :: String
+idFile = savedDataRoot ++ "id"
+
+fndNodesSeed :: String
+fndNodesSeed = savedDataRoot ++ "seed_nodes_response.in"
+
+fndNodesQ :: String
+fndNodesQ = writeDataRoot ++ "find_nodes_q_"
+
 init :: (Model, Cmd.Cmd Msg)
-init = (Uninitialized, Cmd.randomBytes 20 NewNodeId)
+init = (Uninitialized, Cmd.readFile idFile NewNodeId)
+
 
 update :: Msg -> Model -> (Model, Cmd.Cmd Msg)
 -- Error Parsing
@@ -106,10 +125,21 @@ update (ErrorParsing compactinfo bytes) model = (model, logmsg)
 -- Get new node id. Init server state, request tid for pinging seed node
 update (NewNodeId bs) Uninitialized = (initState, initialCmds)
     where
-        initialCmds = Cmd.batch [ logmsg, pingSeed ]
+        --initialCmds = Cmd.batch [ logmsg, pingSeed ]
+        initialCmds = Cmd.batch [ logmsg, cmds ]
 
         initState = createInitialState (fromByteString bs)
 
+        cmds = Cmd.readFile fndNodesSeed fakeMsg
+
+        fakeMsg = GotEm . mkKpacket
+
+        mkKpacket bytes =
+            case decode bytes of
+                Right k -> k
+                _ -> undefined
+
+        {-
         pingSeed =
             prepareMsg
                 Warmup
@@ -117,6 +147,7 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
                 (Query ourid Ping)
 
         ourid = ourId (conf initState)
+        -}
 
         logmsg = Cmd.log Cmd.DEBUG
             [ "Initializing with node id:"
@@ -125,6 +156,14 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
 
 
 update (GetTime msg) state = (state, Cmd.getTime (GotTime msg))
+
+update (GotEm kpacket) (ServerState { transactions, conf, routingTable }) =
+    respond
+        (CompactInfo 0 0)
+        (Right (TransactionState undefined Warmup undefined))
+        0
+        (message kpacket)
+        (ServerState transactions conf routingTable)
 
 
 -- Get tid for outound Message
@@ -135,6 +174,7 @@ update
             , sendRecipient
             , body
             , newtid
+            , fileindex=filei
             }
         )
         now
@@ -145,7 +185,7 @@ update
             , conf
             , routingTable
             }
-        , Cmd.batch [ logmsg, log2, sendCmd ]
+        , Cmd.batch [ logmsg, logmsg2, sendCmd ]
         )
 
         where
@@ -163,10 +203,15 @@ update
             kpacket = KPacket newtid body Nothing
 
             sendCmd =
+                Cmd.writeFile (fndNodesQ ++ show filei) (BL.toStrict bvalue)
+
+            {-
+            sendCmd =
                 Cmd.sendUDP
                     (listenPort conf)
                     sendRecipient
                     (BL.toStrict bvalue)
+            -}
 
             bvalue = encode kpacket
 
@@ -174,7 +219,7 @@ update
                 [ "Sending", show kpacket
                 , "(" ++ show bvalue ++ ") to", show sendRecipient ]
 
-            log2 = Cmd.log Cmd.DEBUG [ "tid size:", show $ BS.length $ newtid]
+            logmsg2 = Cmd.log Cmd.DEBUG [ "tid size:", show $ BS.length $ newtid]
 
 
 -- Receive a message
@@ -255,13 +300,14 @@ respond
 
             kpacket = KPacket transactionId (Response ourid Ping) Nothing
             ourid = (ourId (conf model))
-            (rt, cmds) = considerNode now (routingTable model) nodeinfo
+            (rt, cmds) = considerNode now (routingTable model) (0,nodeinfo)
             nodeinfo = NodeInfo nodeid sender
             log = Cmd.log Cmd.DEBUG [ "sending", show bvalue]
             bvalue = encode kpacket
 
 
 -- Respond to Ping Response during Warmup
+{-
 respond
     sender
     (Right (TransactionState { action = Warmup }))
@@ -282,7 +328,9 @@ respond
             rt = routingTable model
             nodeinfo = NodeInfo nodeid sender
             ourid = (ourId (conf model))
+-}
 
+-- Respond to FindNode Response during Warmup
 respond
     sender
     (Right (TransactionState { action = Warmup }))
@@ -293,7 +341,7 @@ respond
         (ServerState transactions conf newrt, Cmd.batch (logmsg : cmds))
     | otherwise = (ServerState { transactions, conf, routingTable }, Cmd.none)
         where
-            logmsg = Cmd.log Cmd.INFO [ "Adding to routing table:", show node]
+            logmsg = Cmd.log Cmd.INFO [ "Adding to routing table:", show node ]
             node = NodeInfo nodeid sender
             rt = uncheckedAdd
                     routingTable
@@ -302,20 +350,21 @@ respond
             (newrt, cmds) =
                 foldl
                     ( \(rt_, l) nodeinfo ->
-                        (\(rt__, cmd) -> (rt__, cmd : l))
+                        (\(rt__, cmd) -> (rt__, l ++ [cmd]))
                         (considerNode now rt_ nodeinfo)
                     )
                     (rt, [])
-                    (take 1 ninfos)
+                    (zip [0..] ninfos)
+                    --ninfos -- zip this with [1..] for enumeration for writing files?
 
 
 -- Node has not yet been contacted
 considerNode
     :: POSIXTime
     -> RoutingTable
-    -> NodeInfo
+    -> (Int, NodeInfo)
     -> (RoutingTable, Cmd.Cmd Msg)
-considerNode now rt nodeinfo
+considerNode now rt (i, nodeinfo)
     | exists rt nodeinfo = (rt, Cmd.none)
     | willAdd rt nodeinfo = (rt, pingThem)
     | otherwise = (rt, Cmd.none)
@@ -325,7 +374,8 @@ considerNode now rt nodeinfo
                     now
                     Warmup
                     (compactInfo nodeinfo)
-                    (Query ourid Ping)
+                    (Query ourid (FindNode ourid))
+                    i
             ourid = getOwnId rt
     -- node exists in rt => (Model, Cmd.none)
     -- node can be added (bucket not full or ourid in bucket) => send message
@@ -344,18 +394,22 @@ prepareMsg action compactinfo body =
             , sendRecipient = compactinfo
             , body          = body
             , newtid        = t
+            , fileindex=0
             }
         )
 
-prepareMsg2 :: POSIXTime -> Action -> CompactInfo -> Message -> Cmd.Cmd Msg
-prepareMsg2 now action compactinfo body =
-    Cmd.randomBytes
+prepareMsg2 :: POSIXTime -> Action -> CompactInfo -> Message -> Int -> Cmd.Cmd Msg
+prepareMsg2 now action compactinfo body i =
+    Cmd.randomBytes -- we are here.
+    --We need this to be deterministic and to match the python test ✓.
+    --Then write the payload to a known file instead of sending it.
     tidsize
-    (\t -> GotTime SendMessage
+    (\newid -> GotTime SendMessage
         { sendAction    = action
         , sendRecipient = compactinfo
         , body          = body
-        , newtid        = t
+        , newtid        = newid
+        , fileindex=i
         }
         now
     )
@@ -380,9 +434,13 @@ parseReceivedBytes fromNetinfo (Received { bytes, time }) =
 
 
 subscriptions :: Model -> Sub Msg
+{-
 subscriptions Uninitialized = Sub.none
 subscriptions (ServerState { conf = ServerConfig { listenPort } }) =
     Sub.udp listenPort parseReceivedBytes
+-}
+
+subscriptions _ = Sub.none
 
 
 config :: Config Model Msg

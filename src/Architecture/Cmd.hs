@@ -9,9 +9,11 @@ module Architecture.Cmd
     , print
     , sendUDP
     , getTime
+    , readFile
+    , writeFile
     ) where
 
-import Prelude hiding (log, print)
+import Prelude hiding (log, print, readFile, writeFile)
 import Data.List (intercalate)
 import Data.ByteString (ByteString)
 import Data.Time.Clock.POSIX (POSIXTime)
@@ -55,3 +57,9 @@ print :: Show a => a -> Cmd msg
 print x = Cmd [ CmdLog s ]
     where
         s = (show x) ++ "\n"
+
+readFile :: String -> (ByteString -> msg) -> Cmd msg
+readFile filename f = Cmd [ CmdReadFile filename f ]
+
+writeFile :: String -> ByteString -> Cmd msg
+writeFile filename bs = Cmd [ CmdWriteFile filename bs ]

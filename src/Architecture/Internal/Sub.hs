@@ -3,7 +3,6 @@
 module Architecture.Internal.Sub
     ( TSub (..)
     , Sub (..)
-    , SubStates
     , SubscriptionData (..)
     , Received (..)
     , updateSubscriptions
@@ -11,7 +10,6 @@ module Architecture.Internal.Sub
     , openUDPPort
     ) where
 
-import Data.Map (Map)
 import Control.Monad (foldM)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -34,34 +32,19 @@ import Network.Socket
 import Network.Socket.ByteString (recv, recvFrom)
 import Data.Hashable
 import qualified Data.ByteString as BS
-import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
+import Data.Time.Clock.POSIX (getPOSIXTime)
 
+import Architecture.Internal.Types
+    ( SubscriptionData (..)
+    , Received (..)
+    , SubState
+    )
 import Network.KRPC.Types (Port)
 
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
 maxline :: Int
 maxline = 2048
-
-
-data Received = Received
-    { bytes :: BS.ByteString
-    , time  :: POSIXTime
-    }
-
-
-data SubscriptionData msg
-    = TCPDat
-        { port :: Port
-        , listenSocket :: Socket
-        , connectedSocket :: Maybe Socket
-        , tcpHandler :: (BS.ByteString -> msg)
-        }
-    | UDPDat
-        { port :: Port
-        , boundSocket :: Socket
-        , udpHandler :: (SockAddr -> Received -> msg)
-        }
 
 
 data TSub msg
@@ -73,13 +56,10 @@ instance Hashable (TSub msg) where
     hashWithSalt s (UDP p _) = s `hashWithSalt` (1 :: Int) `hashWithSalt` p
 
 
-type SubStates msg = Map Int (SubscriptionData msg)
-
-
 newtype Sub msg = Sub [ TSub msg ]
 
 
-updateSubscriptions :: SubStates msg -> Sub msg -> IO (SubStates msg)
+updateSubscriptions :: SubState msg -> Sub msg -> IO (SubState msg)
 updateSubscriptions substates (Sub tsubs) = do
     mapM_ unsub unloads
     loaded <- foldM foldSubs Map.empty loads
@@ -108,7 +88,7 @@ updateSubscriptions substates (Sub tsubs) = do
 
         unloads = substates `Map.withoutKeys` (Set.fromList tsubkeys)
 
-        foldSubs :: SubStates msg -> (Int, TSub msg) -> IO (SubStates msg)
+        foldSubs :: SubState msg -> (Int, TSub msg) -> IO (SubState msg)
         foldSubs s (k, t) =
             sub t >>= (\s_ -> (return $ Map.insert k s_ s))
 
@@ -119,7 +99,7 @@ updateSubscriptions substates (Sub tsubs) = do
 
         tsubkeys = map hash tsubs
 
-updateHandlers :: SubStates msg -> [ (Int, TSub msg) ] -> SubStates msg
+updateHandlers :: SubState msg -> [ (Int, TSub msg) ] -> SubState msg
 updateHandlers s tsubs = foldl something Map.empty tsubs
     where
         something s_ (key, tsub) =
@@ -166,13 +146,13 @@ openUDPPort :: Port -> IO Socket
 openUDPPort = bindSocket Datagram
 
 
-readSubscriptions :: SubStates msg -> IO (SubStates msg, [ msg ])
+readSubscriptions :: SubState msg -> IO (SubState msg, [ msg ])
 readSubscriptions = (foldM ff (Map.empty, [])) . Map.assocs
     where
         ff ::
-            (SubStates msg, [ msg ]) ->
+            (SubState msg, [ msg ]) ->
             (Int, SubscriptionData msg) ->
-            IO (SubStates msg, [ msg ])
+            IO (SubState msg, [ msg ])
         ff (states, msgs) (key, value) =
             readSub value >>=
                 \(d, mmsg) ->
