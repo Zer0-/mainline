@@ -17,7 +17,7 @@ import Network.Socket
     ( Socket
     , socket
     , SocketType (Stream, Datagram)
-    , SockAddr
+    , SockAddr (..)
     , Family (AF_INET)
     , AddrInfo (addrFlags, addrFamily, addrSocketType, addrAddress)
     , AddrInfoFlag (AI_PASSIVE)
@@ -28,6 +28,7 @@ import Network.Socket
     , listen
     , close
     , accept
+    , hostAddressToTuple
     )
 import Network.Socket.ByteString (recv, recvFrom)
 import Data.Hashable
@@ -39,7 +40,10 @@ import Architecture.Internal.Types
     , Received (..)
     , SubState
     )
-import Network.KRPC.Types (Port)
+import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
+import Network.Octets (fromOctets)
+
+import Debug.Trace (trace)
 
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
@@ -49,7 +53,7 @@ maxline = 2048
 
 data TSub msg
     = TCP Port (BS.ByteString -> msg)
-    | UDP Port (SockAddr -> Received -> msg)
+    | UDP Port (CompactInfo -> Received -> msg)
 
 instance Hashable (TSub msg) where
     hashWithSalt s (TCP p _) = s `hashWithSalt` (0 :: Int) `hashWithSalt` p
@@ -75,7 +79,7 @@ updateSubscriptions substates (Sub tsubs) = do
             close listenSocket
 
         unsub (UDPDat { boundSocket }) = do
-            close boundSocket
+            trace "closing bound udp socket" close boundSocket
 
         sub :: TSub msg -> IO (SubscriptionData msg)
         sub (TCP p f) = do
@@ -83,7 +87,7 @@ updateSubscriptions substates (Sub tsubs) = do
             return $ TCPDat p sock Nothing f
 
         sub (UDP p f) = do
-            sock <- openUDPPort p
+            sock <- trace "opening udp port" (openUDPPort p)
             return $ UDPDat p sock f
 
         unloads = substates `Map.withoutKeys` (Set.fromList tsubkeys)
@@ -147,16 +151,16 @@ openUDPPort = bindSocket Datagram
 
 
 readSubscriptions :: SubState msg -> IO (SubState msg, [ msg ])
-readSubscriptions = (foldM ff (Map.empty, [])) . Map.assocs
+readSubscriptions x = trace ("readSubscriptions size x: " ++ (show $ Map.size x) ++ "  size assocs:" ++ (show $ length $ Map.assocs x)) $ ((foldM ff (Map.empty, [])) . Map.assocs) x
     where
         ff ::
             (SubState msg, [ msg ]) ->
             (Int, SubscriptionData msg) ->
             IO (SubState msg, [ msg ])
-        ff (states, msgs) (key, value) =
+        ff (states, msgs) (key, value) = trace "readSubscriptions.ff" (
             readSub value >>=
                 \(d, mmsg) ->
-                    return (Map.insert key d states, maybe msgs (: msgs) mmsg)
+                    return (Map.insert key d states, maybe msgs (: msgs) mmsg))
 
 
 readSub :: SubscriptionData msg -> IO (SubscriptionData msg, Maybe msg)
@@ -165,7 +169,7 @@ readSub (TCPDat p lsnsc cnsc f) =
         closem cnsc
 
         (c, _) <- accept $ lsnsc
-        bytes <- recvAll BS.empty c
+        bytes <- trace "reading in from tcp socket" (recvAll BS.empty c)
         return (TCPDat p lsnsc (Just c) f, Just $ f bytes)
 
     where
@@ -178,10 +182,31 @@ readSub (TCPDat p lsnsc cnsc f) =
                 _ -> recvAll (bss `BS.append` bs) sock
 
 readSub (UDPDat { port, boundSocket, udpHandler }) = do
+    putStrLn $ "reading udp socket, port " ++ show port
     (bs, sockaddr) <- recvFrom boundSocket maxline
+    putStrLn $ "received " ++ (show $ BS.length bs) ++ " bytes from udp socket"
     now <- getPOSIXTime
 
-    return (UDPDat port boundSocket udpHandler, Just $ udpHandler sockaddr (Received bs now))
+    return
+        ( UDPDat
+            port
+            boundSocket
+            udpHandler
+        , Just $ udpHandler
+            (addrToCi sockaddr)
+            (Received bs now)
+        )
 
 closem :: Maybe Socket -> IO ()
 closem = maybe (return ()) close
+
+
+addrToCi :: SockAddr -> CompactInfo
+addrToCi (SockAddrInet port host) =
+    CompactInfo
+        (fromOctets
+            $ (\(a1, a2, a3, a4) -> [a1, a2, a3, a4])
+            $ hostAddressToTuple host)
+        (fromIntegral port)
+
+addrToCi _ = undefined

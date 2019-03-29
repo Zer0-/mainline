@@ -5,9 +5,9 @@ let
   inherit (nixpkgs) pkgs;
 
   f = { mkDerivation, base, bencoding, bytestring, containers
-      , Crypto, HUnit, network, cpu, QuickCheck, stdenv, test-framework
+      , Crypto, HUnit, network, QuickCheck, stdenv, test-framework
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
-      , DRBG, text, time, cabal-install
+      , DRBG, text, time, cabal-install, network-transport, cpu
       }:
       mkDerivation {
         pname = "Mainline";
@@ -17,13 +17,14 @@ let
         isExecutable = true;
         libraryHaskellDepends = [ base ];
         executableHaskellDepends = [
-          base bencoding bytestring containers Crypto network cpu crypto-api
-          DRBG text time
+          base bencoding bytestring containers Crypto network crypto-api
+          DRBG text time cpu
         ];
         testHaskellDepends = [
-          base bencoding bytestring containers Crypto cpu HUnit QuickCheck
+          base bencoding bytestring containers Crypto HUnit QuickCheck
           test-framework test-framework-hunit test-framework-quickcheck2
           cabal-install
+          network-transport
         ];
         license = stdenv.lib.licenses.gpl2;
       };

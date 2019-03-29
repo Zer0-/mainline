@@ -9,11 +9,10 @@ import Data.Map (Map)
 import qualified Data.ByteString as BS
 import Network.Socket
     ( Socket
-    , SockAddr
     )
 import Data.Time.Clock.POSIX (POSIXTime)
 
-import Network.KRPC.Types (Port)
+import Network.KRPC.Types (Port, CompactInfo)
 
 data Received = Received
     { bytes :: BS.ByteString
@@ -31,7 +30,7 @@ data SubscriptionData msg
     | UDPDat
         { port :: Port
         , boundSocket :: Socket
-        , udpHandler :: (SockAddr -> Received -> msg)
+        , udpHandler :: (CompactInfo -> Received -> msg)
         }
 
 
@@ -41,5 +40,4 @@ type SubState msg = Map Int (SubscriptionData msg)
 
 data InternalState msg = InternalState
     { subState :: SubState msg
-    , mockRng :: Int
     }

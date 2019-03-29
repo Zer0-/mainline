@@ -16,7 +16,7 @@ import Architecture.Internal.Sub
     )
 import qualified Architecture.Cmd as Cmd
 
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 
 data Config model msg =
     Config
@@ -62,7 +62,7 @@ updateModelWithSubMsgs
     -> IO (SubState msg, Config model msg)
 updateModelWithSubMsgs substates cfg =
     do
-      (newSubStates, msgs) <- readSubscriptions substates
+      (newSubStates, msgs) <- trace ("reading " ++ (show $ Map.size substates) ++ " subscriptions") readSubscriptions substates
 
       return $
           ( newSubStates
@@ -87,4 +87,4 @@ run_ internalState cfg =
                 >>= \(s, c) -> run_ (internalState2 { subState = s }) c
 
 run :: Config model msg -> IO ()
-run = run_ (InternalState Map.empty 50)
+run = run_ (InternalState Map.empty)

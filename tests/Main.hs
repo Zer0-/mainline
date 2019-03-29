@@ -23,6 +23,8 @@ import Network.KRPC.InternalConstants
     , bs_id
     )
 
+import Network.Transport.Internal (decodeWord16, decodeWord32)
+
 --import Debug.Trace
 
 prop_fits :: Word32 -> Int -> Word32 -> Word32 -> Word32 -> Bool
@@ -47,32 +49,46 @@ prop_bounds bid bsize xs
         bounds (Bucket _ _ min_ max_ _) = (min_, max_)
         bucket = Bucket bid bsize minBound maxBound Set.empty
 
+
+
+word16_bytestring_conversion :: [Word8] -> Bool
+word16_bytestring_conversion bs =
+    ((fromOctets padded) :: Word16) == (decodeWord16 $ pack padded)
+    where
+        padded = take 2 (extendListWith bs 0)
+
 word16_bytestring_bijection :: [Word8] -> Bool
-word16_bytestring_bijection b = padded == (octets . word16FromOctets) b
+word16_bytestring_bijection b = padded == (octets . word16FromOctets) padded
     where
         padded = take 2 (extendListWith b 0)
         word16FromOctets = fromOctets :: [Word8] -> Word16
 
 word32_bytestring_bijection :: [Word8] -> Bool
-word32_bytestring_bijection b = padded == (octets . word16FromOctets) b
+word32_bytestring_bijection b = padded == (octets . word16FromOctets) padded
     where
         padded = take 4 (extendListWith b 0)
         word16FromOctets = fromOctets :: [Word8] -> Word32
 
+word32_bytestring_conversion :: [Word8] -> Bool
+word32_bytestring_conversion bs =
+    ((fromOctets padded) :: Word32) == (decodeWord32 $ pack padded)
+    where
+        padded = take 4 (extendListWith bs 0)
+
 word160_bytestring_bijection :: [Word8] -> Bool
-word160_bytestring_bijection b = padded == (octets . word160FromOctets) b
+word160_bytestring_bijection b = padded == (octets . word160FromOctets) padded
     where
         padded = take 20 (extendListWith b 0)
         word160FromOctets = fromOctets :: [Word8] -> Word160
 
 compactInfo_bytestring_bijection :: [Word8] -> Bool
-compactInfo_bytestring_bijection b = padded == (octets . word16FromOctets) b
+compactInfo_bytestring_bijection b = padded == (octets . word16FromOctets) padded
     where
         padded = take 6 (extendListWith b 0)
         word16FromOctets = fromOctets :: [Word8] -> CompactInfo
 
 nodeInfo_bytestring_bijection :: [Word8] -> Bool
-nodeInfo_bytestring_bijection b = padded == (octets . word16FromOctets) b
+nodeInfo_bytestring_bijection b = padded == (octets . word16FromOctets) padded
     where
         padded = take 26 (extendListWith b 0)
         word16FromOctets = fromOctets :: [Word8] -> NodeInfo
@@ -338,6 +354,8 @@ tests =
         , testProperty "ByteString to Word160 is reversable"     word160_bytestring_bijection
         , testProperty "ByteString to CompactInfo is reversable" compactInfo_bytestring_bijection
         , testProperty "ByteString to NodeInfo is reversable"    nodeInfo_bytestring_bijection
+        , testProperty "Compare parsing Word16 from octets"      word16_bytestring_conversion
+        , testProperty "Compare parsing Word32 from octets"      word32_bytestring_conversion
         ]
     , testGroup "KRPC Sanity"
         [ testProperty "decode Error Message"                    fmt_decodeErr

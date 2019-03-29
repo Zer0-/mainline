@@ -11,11 +11,12 @@ import qualified Data.Map as Map
 import qualified Data.ByteString as BS
 import Crypto.Random (newGenIO, genBytes)
 import Crypto.Random.DRBG (CtrDRBG)
-import Network.Socket (SockAddr (..))
+import Network.Socket (SockAddr (..), tupleToHostAddress)
 import Network.Socket.ByteString (sendTo)
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
+import Network.Octets (octets)
 import Architecture.Internal.Types
     ( SubscriptionData (..)
     , InternalState (..)
@@ -25,9 +26,7 @@ import Architecture.Internal.Sub
     , openUDPPort
     )
 
--- tmp
-import Network.KRPC.Helpers (stringpack)
--- /tmp
+import Debug.Trace (trace)
 
 data TCmd msg
     = CmdLog String
@@ -52,18 +51,12 @@ execTCmd states (CmdGetTime f) =
 execTCmd states (CmdLog msg) = putStr msg >> return (states, Nothing)
 
 execTCmd states (CmdRandomBytes n f) =
-    return (states { mockRng = i + 1 }, Just (f bs))
-    where
-        i = mockRng states
-        bs = stringpack $ show i
-{-
     do
         g <- newGenIO :: IO CtrDRBG
 
         case genBytes n g of
             Left err -> error $ show err
             Right (result, _) -> return (states, Just (f result))
--}
 
 
 execTCmd states (CmdReadFile filename f) =
@@ -90,14 +83,18 @@ execTCmd states (CmdSendUDP srcPort dest bs) =
 
         where
             sockaddr = ciToAddr dest
+
             ciToAddr :: CompactInfo -> SockAddr
-            ciToAddr (CompactInfo ip p) =
-                SockAddrInet (fromIntegral p) ip
+            ciToAddr (CompactInfo ip p) = SockAddrInet
+                (fromIntegral p)
+                ( tupleToHostAddress
+                    $ (\[a1, a2, a3, a4] -> (a1, a2, a3, a4))
+                    $ octets ip)
 
 
             getSock =
                 maybe
-                    ( openUDPPort srcPort >>=
+                    ( trace ("opening udp port for send cmd on port " ++ show srcPort) (openUDPPort srcPort) >>=
                         \sock ->
                             return
                                 ( Map.insert
