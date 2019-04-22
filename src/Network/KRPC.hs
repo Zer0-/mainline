@@ -338,3 +338,23 @@ parseNodes = Nodes . (map fromByteString) . splitBytes
               | BS.null b = []
               | otherwise =
                   BS.take 26 b : splitBytes (BS.drop 26 b)
+
+
+data BVal
+    = Bs
+    | Be
+    | BBs BS.ByteString
+    | BInt Integer
+    | Li
+    | Le
+
+
+scanner :: BValue -> [BVal]
+scanner (BInteger i) = [BInt i]
+scanner (BString s) = [BBs s]
+scanner (BDict d) = Bs : scannerB d ++ [Be]
+    where
+        scannerB :: BDictMap  BValue -> [BVal]
+        scannerB Nil = []
+        scannerB (Cons bs b d2) = BBs bs : scanner b ++ scannerB d2
+scanner (BList l) = Li : foldl (++) [] (map scanner l) ++ [Le]
