@@ -153,7 +153,7 @@ msgToBDictMap (Nodes ns) =
     where
         nodes = BS.concat $ map octToByteString ns
 
-msgToBDictMap (AskPeers i) = singleton (stringpack "info_hash") (bEncode i)
+msgToBDictMap (GetPeers i) = singleton (stringpack "info_hash") (bEncode i)
 
 msgToBDictMap (PeersFound t (Nodes n)) =
     singleton (stringpack "token")  (toBEncode t) `union`
@@ -177,7 +177,7 @@ msgToBDictMap _ = undefined
 msgName :: Message -> String
 msgName  Ping                  = "ping"
 msgName (FindNode _          ) = "find_node"
-msgName (AskPeers _          ) = "get_peers"
+msgName (GetPeers _          ) = "get_peers"
 msgName (AnnouncePeer _ _ _ _) = "announce_peer"
 msgName _                      = undefined
 
@@ -232,7 +232,7 @@ bDictMapToMsg (Cons r (BDict (Cons i (BString nid)
     && n    == stringpack "nodes" =
         Right $ Response (fromByteString nid) (parseNodes nodes)
 
---AskPeers Query
+--GetPeers Query
 bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
                              (Cons n (BString info) Nil)))
               (Cons _ (BString qval)
@@ -242,7 +242,7 @@ bDictMapToMsg (Cons a (BDict (Cons i (BString nid)
     && i    == bs_id
     && n    == stringpack "info_hash"
     && qval == stringpack "get_peers" =
-        Right $ Query (fromByteString nid) (AskPeers $ fromByteString info)
+        Right $ Query (fromByteString nid) (GetPeers $ fromByteString info)
 
 --PeersFound Values Response
 bDictMapToMsg (Cons r (BDict (Cons i (BString nid)

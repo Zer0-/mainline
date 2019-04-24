@@ -90,7 +90,7 @@ data Message
     | Ping
     | FindNode NodeID
     | Nodes [NodeInfo]
-    | AskPeers InfoHash
+    | GetPeers InfoHash
     | PeersFound Token Message
     | Values [CompactInfo]
     | AnnouncePeer InfoHash Port Token Bool -- last arg is implied_port

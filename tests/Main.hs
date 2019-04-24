@@ -210,14 +210,14 @@ fmt_decodeNodesResponse t i ns = fromBEncode bval == expected
         mkNodes [] = []
         mkNodes xs = fromOctets (take 26 xs) : mkNodes (drop 26 xs)
 
-fmt_decodeAskPeersQuery :: [Word8] -> [Word8] -> [Word8] -> Bool
-fmt_decodeAskPeersQuery t i info = fromBEncode bval == expected
+fmt_decodeGetPeersQuery :: [Word8] -> [Word8] -> [Word8] -> Bool
+fmt_decodeGetPeersQuery t i info = fromBEncode bval == expected
     where
         expected =
             Right
                 ( KPacket
                     tid
-                    (Query (fromByteString nid) (AskPeers $ fromOctets info))
+                    (Query (fromByteString nid) (GetPeers $ fromOctets info))
                     Nothing
                 )
 
@@ -363,7 +363,7 @@ tests =
         , testProperty "decode Ping Response Message"            fmt_decodePingResponse
         , testProperty "decode FindNode Query Message"           fmt_decodeFindNodeQuery
         , testProperty "decode Nodes Response Message"           fmt_decodeNodesResponse
-        , testProperty "decode AskPeers Query Message"           fmt_decodeAskPeersQuery
+        , testProperty "decode GetPeers Query Message"           fmt_decodeGetPeersQuery
         , testProperty "decode PeersFound Values Message"        fmt_decodeFoundValuesResponse
         , testProperty "decode PeersFound Nodes Message"         fmt_decodeFoundNodesResponse
         , testProperty "decode Announce Peer Query"              fmt_decodeAnnoucePeerQuery
