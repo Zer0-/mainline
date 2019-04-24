@@ -15,7 +15,13 @@ import Mainline.Bucket
 import Network.Octets (Octets (..), fromByteString)
 import Network.KRPC (KPacket (..), parseNodes)
 import Network.KRPC.Helpers (extendListWith, stringpack, bd)
-import Network.KRPC.Types (CompactInfo, NodeInfo, Message(..))
+import Network.KRPC.Types
+    ( CompactInfo
+    , NodeInfo
+    , Message     (..)
+    , QueryDat    (..)
+    , ResponseDat (..)
+    )
 import Network.KRPC.InternalConstants
     ( bs_a
     , bs_r
@@ -146,7 +152,7 @@ fmt_decodePingResponse i n = fromBEncode bval == expected
             Right
                 ( KPacket
                     tid
-                    (Response (fromByteString nid) Ping)
+                    (Response (fromByteString nid) Pong)
                     Nothing
                 )
 
@@ -255,7 +261,7 @@ fmt_decodeFoundValuesResponse t i token values = fromBEncode bval == expected
                     ( Response (fromOctets i)
                         ( PeersFound
                             (pack token)
-                            (Values $ mkValues values)
+                            (mkValues values)
                         )
                     )
                     Nothing
@@ -281,7 +287,7 @@ fmt_decodeFoundNodesResponse t i token nodes
                   ( KPacket
                       tid
                       ( Response (fromOctets i)
-                          ( PeersFound
+                          ( NodesFound
                               (pack token)
                               (parseNodes $ pack nodes)
                           )
@@ -326,10 +332,10 @@ fmt_decodeAnnoucePeerQuery
                         tid
                         ( Query (fromOctets i)
                             ( AnnouncePeer
+                                (impliedPortArg == True && impliedPortVal == 1)
                                 (fromOctets nfo)
                                 (fromOctets pval)
                                 (pack token)
-                                (impliedPortArg == True && impliedPortVal == 1)
                             )
                         )
                         Nothing

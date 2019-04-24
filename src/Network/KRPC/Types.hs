@@ -5,6 +5,8 @@ module Network.KRPC.Types
     , CompactInfo (..)
     , NodeInfo    (..)
     , Message     (..)
+    , QueryDat    (..)
+    , ResponseDat (..)
     , bEncode
     ) where
 
@@ -85,16 +87,25 @@ instance BEncode NodeInfo where
 
 
 data Message
-    = Query NodeID Message
-    | Response NodeID Message
-    | Ping
-    | FindNode NodeID
-    | Nodes [NodeInfo]
-    | GetPeers InfoHash
-    | PeersFound Token Message
-    | Values [CompactInfo]
-    | AnnouncePeer InfoHash Port Token Bool -- last arg is implied_port
+    = Query NodeID QueryDat
+    | Response NodeID ResponseDat
     | Error { errCode :: Integer, errMsg :: ByteString }
+    deriving Eq
+
+
+data QueryDat
+    = Ping
+    | FindNode NodeID
+    | GetPeers InfoHash
+    | AnnouncePeer Bool InfoHash Port Token -- for fun, change Bool to Maybe Bool since it's an optional field
+    deriving Eq
+
+
+data ResponseDat
+    = Pong
+    | Nodes [NodeInfo]
+    | PeersFound Token [CompactInfo]
+    | NodesFound Token [NodeInfo]
     deriving Eq
 
 
@@ -111,18 +122,29 @@ instance Show Message where
         "<Response from: " ++ showId nid
             ++ " msg: " ++ show msg ++ ">"
 
+instance Show QueryDat where
+    show Ping = "<Ping>"
+
     show (FindNode nid) = "<FindNode " ++ showId nid ++ ">"
+
+    show (GetPeers ifo) = "<GetPeers " ++ showId ifo ++ ">"
+
+    show (AnnouncePeer b ifo p token)
+        = "<AnnouncePeer implied_port: " ++ show b
+        ++ " infohash: " ++ octToString ifo
+        ++ " port: " ++ show p
+        ++ " token: " ++ show token ++ ">"
+
+instance Show ResponseDat where
+    show (Pong) = "<Pong>"
 
     show (Nodes ns) = "<Nodes " ++ intercalate "," (map show ns) ++ ">"
 
-    show (PeersFound t msg) =
-        "PeersFound{token: " ++ show t ++ " " ++ show msg ++ "}"
+    show (PeersFound t ifo) =
+        "<PeersFound token: " ++ show t ++ " " ++ show ifo ++ ">"
 
-    show (Values v) = "Values" ++ show v
-
-    show Ping = "Ping"
-
-    show _ = ""
+    show (NodesFound t nodes) =
+        "<NodesFound token: " ++ show t ++ " " ++ show nodes ++ ">"
 
 
 octToString :: (Octets a) => a -> String

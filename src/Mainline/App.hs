@@ -29,8 +29,10 @@ import Mainline.RoutingTable
 import Network.KRPC.Types
     ( Port
     , CompactInfo (..)
-    , Message (..)
-    , NodeInfo (..)
+    , Message     (..)
+    , QueryDat    (..)
+    , ResponseDat (..)
+    , NodeInfo    (..)
     , NodeID
     )
 import Mainline.Mainline
@@ -258,7 +260,7 @@ respond
                     sender
                     (BL.toStrict bvalue)
 
-            kpacket = KPacket transactionId (Response ourid Ping) Nothing
+            kpacket = KPacket transactionId (Response ourid Pong) Nothing
             ourid = (ourId (conf model))
             (rt, cmds) = considerNode now (routingTable model) nodeinfo
             nodeinfo = NodeInfo nodeid sender
@@ -266,17 +268,17 @@ respond
             bvalue = encode kpacket
 
 
--- Respond to Ping Response during Warmup
+-- Handle Pong Response during Warmup
 respond
     sender
     (Right (TransactionState { action = Warmup }))
     now
-    (Response nodeid (Ping))
+    (Response nodeid (Pong))
     model
     _
-    | exists rt nodeinfo = (model, Cmd.none)
+    | exists rt nodeinfo  = (model, Cmd.none)
     | willAdd rt nodeinfo = (model, findUs)
-    | otherwise = (model, Cmd.none)
+    | otherwise           = (model, Cmd.none)
         where
             findUs =
                 prepareMsg2
