@@ -8,6 +8,7 @@ let
       , Crypto, HUnit, network, QuickCheck, stdenv, test-framework
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
       , DRBG, text, time, cabal-install, network-transport, cpu
+      , parsec
       }:
       mkDerivation {
         pname = "Mainline";
@@ -18,7 +19,7 @@ let
         libraryHaskellDepends = [ base ];
         executableHaskellDepends = [
           base bencoding bytestring containers Crypto network crypto-api
-          DRBG text time cpu
+          DRBG text time cpu parsec
         ];
         testHaskellDepends = [
           base bencoding bytestring containers Crypto HUnit QuickCheck

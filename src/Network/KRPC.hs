@@ -3,12 +3,15 @@ module Network.KRPC
     , parseNodes
     ) where
 
-import Data.BEncode (BValue (..), BEncode (..), decodingError)
+import Data.BEncode (BValue (..), BEncode (..))
 import Data.BEncode.BDict (BDictMap (..), singleton, empty, union)
 import qualified Data.ByteString as BS
+import Text.Parsec.Prim (runP, Parsec, tokenPrim)
+import Text.Parsec.Pos (incSourceColumn)
+import Text.Parsec.Combinator (between)
 
 import Network.Octets (fromByteString, octToByteString)
-import Network.KRPC.Types (Message (..), bEncode)
+import Network.KRPC.Types (Message (..), NodeID, bEncode)
 import Network.KRPC.Helpers
     ( stringpack
     , bd
@@ -50,7 +53,14 @@ instance BEncode KPacket where
             maybe empty (\v -> singleton bs_v (BString v)) mv `union`
             (msgToBDictMap m)
 
+    fromBEncode bvalue
+        = either
+            (Left . show)
+            (Right . id)
+            (runP kparser () "Inbound" (scanner bvalue))
+
     -- Parse query KPacket
+    {-
     fromBEncode (BDict (Cons a meat
                        (Cons q qval
                        (Cons t (BString tid)
@@ -62,9 +72,11 @@ instance BEncode KPacket where
             where xs = singleton a meat
                     `union` singleton q qval
                     `union` singleton y yval
+    -}
 
 
     -- Parse response KPacket
+    {-
     fromBEncode (BDict (Cons a meat
                        (Cons t (BString tid)
                        (Cons y yval Nil))))
@@ -75,8 +87,10 @@ instance BEncode KPacket where
             where
                 xs = singleton a meat `union`
                     singleton y yval
+    -}
 
     -- Parse response KPacket containing version key
+    {-
     fromBEncode
         ( BDict
             ( Cons a meat
@@ -94,9 +108,11 @@ instance BEncode KPacket where
             where
                 xs = singleton a meat `union`
                     singleton y yval
+    -}
 
     -- Parse response KPacket containing ip key
     -- (returned by certain bootstrap nodes)
+    {-
     fromBEncode
         ( BDict
             ( Cons i _
@@ -116,6 +132,7 @@ instance BEncode KPacket where
                     singleton y yval
 
     fromBEncode _ = decodingError "- this doesn't look like a KRPC message"
+    -}
 
 
 
@@ -340,6 +357,10 @@ parseNodes = Nodes . (map fromByteString) . splitBytes
                   BS.take 26 b : splitBytes (BS.drop 26 b)
 
 
+
+type Parser a = Parsec [BVal] () a
+
+
 data BVal
     = Bs
     | Be
@@ -347,6 +368,43 @@ data BVal
     | BInt Integer
     | Li
     | Le
+    deriving (Eq, Show)
+
+
+kparser :: Parser KPacket
+kparser = withObject $ do
+    isBs bs_a
+    withObject $ do
+        isBs bs_id
+        nodeid <- parseNodeid
+        return undefined
+
+
+parseNodeid :: Parser NodeID
+parseNodeid = satisfy test
+    where
+        test (BBs nodeid) = Just $ fromByteString nodeid
+        test _ = Nothing
+
+
+withObject :: Parser a -> Parser a
+withObject inner = between (isVal Bs) (isVal Be) inner
+
+
+
+isVal :: BVal -> Parser ()
+isVal x = satisfy (\v -> if x == v then Just () else Nothing)
+
+
+isBs :: BS.ByteString -> Parser ()
+isBs = isVal . BBs
+
+
+satisfy :: (BVal -> Maybe a) -> Parser a
+satisfy test = tokenPrim show updatePos test
+    where
+        updatePos pos _ _ = incSourceColumn pos 1
+
 
 
 scanner :: BValue -> [BVal]
