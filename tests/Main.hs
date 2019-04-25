@@ -31,7 +31,7 @@ import Network.KRPC.InternalConstants
 
 import Network.Transport.Internal (decodeWord16, decodeWord32)
 
---import Debug.Trace
+import Debug.Trace
 
 prop_fits :: Word32 -> Int -> Word32 -> Word32 -> Word32 -> Bool
 prop_fits bid size bmin bmax value =
@@ -189,7 +189,7 @@ fmt_decodeFindNodeQuery i n t =
         target = pack t
 
 fmt_decodeNodesResponse :: [Word8] -> [Word8] -> [Word8] -> Bool
-fmt_decodeNodesResponse t i ns = fromBEncode bval == expected
+fmt_decodeNodesResponse t i ns = traceShowId (fromBEncode bval) == traceShowId expected
     where
         tid = pack t
         nid = pack i
@@ -278,8 +278,8 @@ fmt_decodeFoundNodesResponse t i token nodes
           bval = BDict $
             singleton bs_r (BDict $
                 singleton bs_id (BString $ pack i)
-                `union` singleton (stringpack "token") (BString $ pack token)
-                `union` singleton (stringpack "nodes") (BString $ pack nodes))
+                `union` singleton (stringpack "nodes") (BString $ pack nodes)
+                `union` singleton (stringpack "token") (BString $ pack token))
             `union` bd "y" "r"
             `union` singleton bs_t (BString tid)
           expected =
