@@ -6,7 +6,7 @@ module Network.KRPC
 import Data.BEncode (BValue (..), BEncode (..))
 import Data.BEncode.BDict (BDictMap (..), singleton, empty, union)
 import qualified Data.ByteString as BS
-import Text.Parsec.Prim (runP, Parsec, tokenPrim, (<|>), try)
+import Text.Parsec.Prim (runP, Parsec, tokenPrim, (<|>), try, many)
 import Text.Parsec.Pos (incSourceColumn)
 import Text.Parsec.Combinator (between, option)
 
@@ -159,7 +159,70 @@ data BVal
 
 
 kparser :: Parser KPacket
-kparser = withObject qparser >> return undefined
+kparser = withObject $ do
+    msg <- (qparser <|> rparser <|> eparser)
+
+    case msg of
+        (Query _ m) -> isBs bs_q >> (isBs $ stringpack $ queryName m)
+        _ -> return ()
+
+    isBs bs_t
+    tid <- parseBs
+
+    v <- option Nothing (isBs bs_v >> (Just <$> (try parseBs)))
+    isBs bs_y
+
+    case msg of
+        (Query _ _) -> isBs bs_q
+        (Response _ _) -> isBs bs_r
+        (Error _ _) -> isBs bs_e
+
+    return $ KPacket tid msg v
+
+
+eparser :: Parser Message
+eparser = isBs bs_e >> withList (Error <$> parseInt <*> parseBs)
+
+
+rparser :: Parser Message
+rparser = do
+    isBs bs_r
+    withObject $ do
+        isBs bs_id
+        nodeid <- parseNodeid
+        rd <- rdatparser
+        return $ Response nodeid rd
+
+
+rdatparser :: Parser ResponseDat
+rdatparser
+    =  (Nodes . parseNodes <$> nodes)
+    <|> peersFound
+    <|> nodesFound
+    <|> return Pong
+
+    where
+        nodes = isBs (stringpack "nodes") >> try parseBs
+
+        peersFound = try $ do
+            token <- toke
+
+            isBs (stringpack "values")
+            cmptinfos <- withList $ many parseBs
+
+            return $ PeersFound token (map fromByteString cmptinfos)
+
+        nodesFound =  try $ do
+            token <- toke
+
+            isBs (stringpack "nodes")
+            bs <- parseBs
+
+            return $ NodesFound token (parseNodes bs)
+
+        toke = isBs (stringpack "token") >> parseBs
+
+
 
 
 qparser :: Parser Message
@@ -180,13 +243,9 @@ qdatparser
     <|> return Ping
 
     where
-        findNode
-            = isBs (stringpack "target")
-            >> try parseNodeid
+        findNode = isBs (stringpack "target") >> try parseNodeid
 
-        getPeers
-            = isBs (stringpack "get_peers")
-            >> try parseNodeid
+        getPeers = isBs (stringpack "get_peers") >> try parseNodeid
 
         announcePeer = do
             flag <- option False impliedPort
@@ -205,7 +264,7 @@ qdatparser
             return $ AnnouncePeer flag info_hash port token
 
         impliedPort
-            = (not . ((==) 0))
+            = (/=) 0
             <$> (isBs (stringpack "implied_port") >> try parseInt)
 
 
@@ -227,8 +286,15 @@ parseNodeid :: Parser NodeID
 parseNodeid = fromByteString <$> parseBs
 
 
+withList :: Parser a -> Parser a
+withList = wrappedBy Li Le
+
+
 withObject :: Parser a -> Parser a
-withObject inner = between (isVal Bs) (isVal Be) inner
+withObject = wrappedBy Bs Be
+
+wrappedBy :: BVal -> BVal -> Parser a -> Parser a
+wrappedBy s e inner = between (isVal s) (isVal e) inner
 
 
 isVal :: BVal -> Parser ()
@@ -253,4 +319,4 @@ scanner (BDict d) = Bs : scannerB d ++ [Be]
         scannerB :: BDictMap  BValue -> [BVal]
         scannerB Nil = []
         scannerB (Cons bs b d2) = BBs bs : scanner b ++ scannerB d2
-scanner (BList l) = Li : foldl (++) [] (map scanner l) ++ [Le]
+scanner (BList l) = Li : (l >>= scanner) ++ [Le]
