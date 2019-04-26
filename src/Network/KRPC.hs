@@ -9,7 +9,7 @@ import Data.BEncode.BDict (BDictMap (..), singleton, empty, union)
 import qualified Data.ByteString as BS
 import Text.Parsec.Prim (runP, Parsec, tokenPrim, (<|>), try, many)
 import Text.Parsec.Pos (incSourceColumn)
-import Text.Parsec.Combinator (between, option)
+import Text.Parsec.Combinator (between, option, optional)
 
 import Network.Octets (fromByteString, octToByteString)
 import Network.KRPC.Types
@@ -161,6 +161,7 @@ data BVal
 
 kparser :: Parser KPacket
 kparser = withObject $ do
+    optional (isBs bs_ip >> parseBs)
     msg <- (qparser <|> rparser <|> eparser)
 
     case msg of
