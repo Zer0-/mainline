@@ -54,12 +54,6 @@ seedNodeHost = fromOctets [ 82, 221, 103, 244 ]
 --seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
 --seedNodeHost = fromOctets [ 67, 215, 246, 10 ]
 
-writeDataRoot :: String
-writeDataRoot = "/tmp/dht_out2/"
-
-receivedResponseDump :: String
-receivedResponseDump = writeDataRoot ++ "findNodes_response.out"
-
 seedNodeInfo :: CompactInfo
 seedNodeInfo = CompactInfo seedNodeHost seedNodePort
 
@@ -316,7 +310,6 @@ respond
 
             cmds = Cmd.batch $
                 [ logmsg
-                , Cmd.writeFile receivedResponseDump bytes
                 , Cmd.log Cmd.INFO (map show ninfos)
                 ] ++ sendCmds
 
