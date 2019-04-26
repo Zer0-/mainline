@@ -6,14 +6,14 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map             as Map
 import Data.Word                     (Word32)
 import Data.Maybe                    (isJust)
-import Data.BEncode                  (encode, decode)
+import Data.BEncode                  (encode, decode, BValue)
 import Data.Time.Clock.POSIX         (POSIXTime)
 
 import Architecture.TEA              (Config (..), run)
 import qualified Architecture.Cmd as Cmd
 import qualified Architecture.Sub as Sub
 import Architecture.Sub              (Sub, Received (..))
-import Network.KRPC                  (KPacket (..))
+import Network.KRPC                  (KPacket (..), scanner)
 import Network.KRPC.Helpers          (hexify)
 import Network.Octets                (Octets (..), fromByteString)
 import Mainline.RoutingTable
@@ -83,7 +83,7 @@ createInitialState newNodeId =
 data Msg
     = NewNodeId BS.ByteString
     | Inbound POSIXTime CompactInfo KPacket BS.ByteString
-    | ErrorParsing CompactInfo BS.ByteString
+    | ErrorParsing CompactInfo BS.ByteString String
     | GetTime Msg
     | GotTime Msg POSIXTime
     | SendMessage
@@ -100,14 +100,20 @@ init = (Uninitialized, Cmd.randomBytes 20 NewNodeId)
 
 update :: Msg -> Model -> (Model, Cmd.Cmd Msg)
 -- Error Parsing
-update (ErrorParsing compactinfo bytes) model = (model, logmsg)
+update (ErrorParsing compactinfo bytes errmsg) model = (model, logmsg)
     where
-        logmsg = Cmd.log Cmd.INFO
-            [ "Could not parse received message. Sender:"
-            , show (compactinfo)
-            , "Message:"
-            , "\"" ++ (show bytes) ++ "\""
+        logmsg = Cmd.log Cmd.INFO $
+            [ "Could not parse received message. Sender:" , show (compactinfo)
+            , "in:" , show bytes
             ]
+            ++ scnr ++
+            [ "reason:", errmsg
+            ]
+
+        scnr = either
+            (\_ -> [])
+            (\bval -> ["scanner:", show $ scanner bval])
+            (decode bytes)
 
 -- Get new node id. Init server state, request tid for pinging seed node
 update (NewNodeId bs) Uninitialized = (initState, initialCmds)
@@ -385,7 +391,7 @@ parseReceivedBytes :: CompactInfo -> Received -> Msg
 parseReceivedBytes compactinfo (Received { bytes, time }) =
     case decode (traceShowId bytes) of
         Right kpacket -> Inbound time compactinfo kpacket bytes
-        _ -> ErrorParsing compactinfo bytes
+        Left msg -> ErrorParsing compactinfo bytes msg
 
 
 

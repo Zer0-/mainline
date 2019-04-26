@@ -1,6 +1,7 @@
 module Network.KRPC
     ( KPacket (..)
     , parseNodes
+    , scanner
     ) where
 
 import Data.BEncode (BValue (..), BEncode (..))
