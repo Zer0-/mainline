@@ -180,9 +180,7 @@ readSub (TCPDat p lsnsc cnsc f) =
                 _ -> recvAll (bss `BS.append` bs) sock
 
 readSub (UDPDat { port, boundSocket, udpHandler }) = do
-    putStrLn $ "reading udp socket, port " ++ show port
     (bs, sockaddr) <- recvFrom boundSocket maxline
-    putStrLn $ "received " ++ (show $ BS.length bs) ++ " bytes from udp socket"
     now <- getPOSIXTime
 
     return

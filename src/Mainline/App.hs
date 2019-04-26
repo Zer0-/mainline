@@ -42,8 +42,6 @@ import Mainline.Mainline
     , TransactionState (..)
     )
 
-import Debug.Trace (traceShowId)
-
 servePort :: Port
 servePort = 51416
 
@@ -389,7 +387,7 @@ prepareMsg2 now action compactinfo body =
 
 parseReceivedBytes :: CompactInfo -> Received -> Msg
 parseReceivedBytes compactinfo (Received { bytes, time }) =
-    case decode (traceShowId bytes) of
+    case decode bytes of
         Right kpacket -> Inbound time compactinfo kpacket bytes
         Left msg -> ErrorParsing compactinfo bytes msg
 
