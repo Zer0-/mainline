@@ -150,9 +150,9 @@ type Parser a = Parsec [BVal] () a
 
 
 data BVal
-    = Bs
-    | Be
-    | BBs BS.ByteString
+    = Ds
+    | De
+    | Bs BS.ByteString
     | BInt Integer
     | Li
     | Le
@@ -275,7 +275,7 @@ parseInt = satisfy test
 parseBs :: Parser BS.ByteString
 parseBs = satisfy test
     where
-        test (BBs bs) = Just bs
+        test (Bs bs) = Just bs
         test _ = Nothing
 
 
@@ -288,7 +288,7 @@ withList = wrappedBy Li Le
 
 
 withObject :: Parser a -> Parser a
-withObject = wrappedBy Bs Be
+withObject = wrappedBy Ds De
 
 wrappedBy :: BVal -> BVal -> Parser a -> Parser a
 wrappedBy s e inner = between (isVal s) (isVal e) inner
@@ -299,7 +299,7 @@ isVal x = satisfy (\v -> if x == v then Just () else Nothing)
 
 
 isBs :: BS.ByteString -> Parser ()
-isBs = isVal . BBs
+isBs = isVal . Bs
 
 
 satisfy :: (BVal -> Maybe a) -> Parser a
@@ -310,10 +310,10 @@ satisfy test = tokenPrim show updatePos test
 
 scanner :: BValue -> [BVal]
 scanner (BInteger i) = [BInt i]
-scanner (BString s) = [BBs s]
-scanner (BDict d) = Bs : scannerB d ++ [Be]
+scanner (BString s) = [Bs s]
+scanner (BDict d) = Ds : scannerB d ++ [De]
     where
         scannerB :: BDictMap  BValue -> [BVal]
         scannerB Nil = []
-        scannerB (Cons bs b d2) = BBs bs : scanner b ++ scannerB d2
+        scannerB (Cons bs b d2) = Bs bs : scanner b ++ scannerB d2
 scanner (BList l) = Li : (l >>= scanner) ++ [Le]
