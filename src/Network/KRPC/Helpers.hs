@@ -10,7 +10,6 @@ import Data.BEncode.BDict (BDictMap (..), singleton)
 
 import Data.Text.Encoding (decodeUtf8)
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
-import Data.Word (Word8)
 import Data.ByteString.Lazy (toStrict)
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.ByteString as BS
@@ -27,5 +26,5 @@ stringpack = Char8.pack
 bd :: String -> String -> BDictMap BValue
 bd a b = singleton (stringpack a) (BString $ stringpack b)
 
-hexify :: [Word8] -> String
-hexify = show . decodeUtf8 . toStrict . toLazyByteString . byteStringHex . BS.pack
+hexify :: BS.ByteString -> String
+hexify = show . decodeUtf8 . toStrict . toLazyByteString . byteStringHex

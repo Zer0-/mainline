@@ -6,7 +6,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map             as Map
 import Data.Word                     (Word32)
 import Data.Maybe                    (isJust)
-import Data.BEncode                  (encode, decode, BValue)
+import Data.BEncode                  (encode, decode)
 import Data.Time.Clock.POSIX         (POSIXTime)
 
 import Architecture.TEA              (Config (..), run)
@@ -14,7 +14,6 @@ import qualified Architecture.Cmd as Cmd
 import qualified Architecture.Sub as Sub
 import Architecture.Sub              (Sub, Received (..))
 import Network.KRPC                  (KPacket (..), scanner)
-import Network.KRPC.Helpers          (hexify)
 import Network.Octets                (Octets (..), fromByteString)
 import Mainline.RoutingTable
     ( RoutingTable
@@ -74,7 +73,7 @@ createInitialState newNodeId =
 
 data Msg
     = NewNodeId BS.ByteString
-    | Inbound POSIXTime CompactInfo KPacket BS.ByteString
+    | Inbound POSIXTime CompactInfo KPacket
     | ErrorParsing CompactInfo BS.ByteString String
     | GetTime Msg
     | GotTime Msg POSIXTime
@@ -123,7 +122,7 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
 
         logmsg = Cmd.log Cmd.DEBUG
             [ "Initializing with node id:"
-            , hexify $ octets (ourId (conf initState))
+            , show (ourId (conf initState))
             ]
 
 
@@ -181,7 +180,7 @@ update
 
 -- Receive a message
 update
-    (Inbound now client (KPacket { transactionId, message, version }) bytes)
+    (Inbound now client (KPacket { transactionId, message, version }))
     (ServerState { transactions, conf, routingTable }) =
         ( newModel
         , Cmd.batch
@@ -228,7 +227,6 @@ update
                     , routingTable
                     }
                 )
-                bytes
 
 
 respond
@@ -237,7 +235,6 @@ respond
     -> POSIXTime
     -> Message
     -> Model
-    -> BS.ByteString
     -> (Model, Cmd.Cmd Msg)
 -- Respond to Ping
 respond
@@ -246,7 +243,6 @@ respond
     now
     (Query nodeid Ping)
     model
-    _
     | exists (routingTable model) nodeinfo = (model, pong)
     | willAdd (routingTable model) nodeinfo =
         (model { routingTable = rt }, Cmd.batch [log, cmds, pong])
@@ -273,7 +269,6 @@ respond
     now
     (Response nodeid (Pong))
     model
-    _
     | exists rt nodeinfo  = (model, Cmd.none)
     | willAdd rt nodeinfo = (model, findUs)
     | otherwise           = (model, Cmd.none)
@@ -296,7 +291,6 @@ respond
     now
     (Response nodeid (Nodes ninfos))
     (ServerState { transactions, conf, routingTable })
-    bytes
     | willAdd routingTable node =
         (ServerState transactions conf newrt, cmds)
         --(Uninitialized, cmds)
@@ -363,9 +357,7 @@ prepareMsg action compactinfo body =
 
 prepareMsg2 :: POSIXTime -> Action -> CompactInfo -> Message -> Cmd.Cmd Msg
 prepareMsg2 now action compactinfo body =
-    Cmd.randomBytes -- we are here.
-    --We need this to be deterministic and to match the python test ✓.
-    --Then write the payload to a known file instead of sending it.
+    Cmd.randomBytes
     tidsize
     (\newid -> GotTime SendMessage
         { sendAction    = action
@@ -381,7 +373,7 @@ prepareMsg2 now action compactinfo body =
 parseReceivedBytes :: CompactInfo -> Received -> Msg
 parseReceivedBytes compactinfo (Received { bytes, time }) =
     case decode bytes of
-        Right kpacket -> Inbound time compactinfo kpacket bytes
+        Right kpacket -> Inbound time compactinfo kpacket
         Left msg -> ErrorParsing compactinfo bytes msg
 
 

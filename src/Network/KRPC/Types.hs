@@ -11,17 +11,15 @@ module Network.KRPC.Types
     ) where
 
 import Data.Word        (Word16, Word32)
-import Data.Digest.SHA1 (Word160)
 import Data.List        (intercalate)
 import Data.ByteString  (ByteString)
 import Data.BEncode     (BEncode (..), BValue)
 
-import Network.KRPC.Helpers (hexify)
 import Network.Octets   (Octets (..), octToByteString)
 
-type NodeID = Word160
+type NodeID = Integer
 
-type InfoHash = Word160
+type InfoHash = Integer
 
 type Port = Word16
 
@@ -67,7 +65,7 @@ data NodeInfo = NodeInfo
 
 instance Show NodeInfo where
     show (NodeInfo nodeid compactinfo) =
-        "<Node " ++ showId nodeid ++ " " ++ show compactinfo ++ ">"
+        "<Node " ++ show nodeid ++ " " ++ show compactinfo ++ ">"
 
 
 instance Octets NodeInfo where
@@ -115,23 +113,23 @@ instance Show Message where
             ++ "msg: "  ++ show msg ++ ">"
 
     show (Query nid msg) =
-        "<Query from: " ++ showId nid
+        "<Query from: " ++ show nid
             ++ " msg: " ++ show msg ++ ">"
 
     show (Response nid msg) =
-        "<Response from: " ++ showId nid
+        "<Response from: " ++ show nid
             ++ " msg: " ++ show msg ++ ">"
 
 instance Show QueryDat where
     show Ping = "<Ping>"
 
-    show (FindNode nid) = "<FindNode " ++ showId nid ++ ">"
+    show (FindNode nid) = "<FindNode " ++ show nid ++ ">"
 
-    show (GetPeers ifo) = "<GetPeers " ++ showId ifo ++ ">"
+    show (GetPeers ifo) = "<GetPeers " ++ show ifo ++ ">"
 
     show (AnnouncePeer b ifo p token)
         = "<AnnouncePeer implied_port: " ++ show b
-        ++ " infohash: " ++ octToString ifo
+        ++ " infohash: " ++ show ifo
         ++ " port: " ++ show p
         ++ " token: " ++ show token ++ ">"
 
@@ -146,12 +144,6 @@ instance Show ResponseDat where
     show (NodesFound t nodes) =
         "<NodesFound token: " ++ show t ++ " " ++ show nodes ++ ">"
 
-
-octToString :: (Octets a) => a -> String
-octToString = hexify . octets
-
-showId :: Octets a => a -> String
-showId = (take 8) . octToString
 
 bEncode :: (Octets a) => a -> BValue
 bEncode = toBEncode . octToByteString

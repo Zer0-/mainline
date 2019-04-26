@@ -15,7 +15,6 @@ import Network.KRPC.Types
     , Port
     )
 import Mainline.RoutingTable (RoutingTable)
-import Network.KRPC.WordInstances ()
 
 data Action = Warmup
 

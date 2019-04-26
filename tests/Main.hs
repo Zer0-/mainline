@@ -9,7 +9,6 @@ import Data.ByteString (pack)
 
 import Data.BEncode
 import Data.BEncode.BDict hiding (map)
-import Data.Digest.SHA1 (Word160)
 
 import Mainline.Bucket
 import Network.Octets (Octets (..), fromByteString)
@@ -85,7 +84,7 @@ word160_bytestring_bijection :: [Word8] -> Bool
 word160_bytestring_bijection b = padded == (octets . word160FromOctets) padded
     where
         padded = take 20 (extendListWith b 0)
-        word160FromOctets = fromOctets :: [Word8] -> Word160
+        word160FromOctets = fromOctets :: [Word8] -> Integer
 
 compactInfo_bytestring_bijection :: [Word8] -> Bool
 compactInfo_bytestring_bijection b = padded == (octets . word16FromOctets) padded

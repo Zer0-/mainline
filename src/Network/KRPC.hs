@@ -48,7 +48,7 @@ data KPacket = KPacket
 
 instance Show KPacket where
     show (KPacket t m mv) =
-        "<KPacket t:" ++ hexify (BS.unpack t)
+        "<KPacket t:" ++ hexify t
         ++ " msg: " ++ show m
         ++ maybe "" (\v -> " v: " ++ show v) mv
         ++ ">"

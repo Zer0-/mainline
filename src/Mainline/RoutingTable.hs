@@ -13,10 +13,7 @@ module Mainline.RoutingTable
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Data.Word (Word32)
-import Data.Digest.SHA1 (Word160 (..))
 import Data.Time.Clock.POSIX (POSIXTime)
-import Network.KRPC.WordInstances()
 
 import Mainline.Bucket
     ( Bucket (Bucket)
@@ -67,7 +64,7 @@ data RoutingTable = RoutingTable
 uncheckedAdd :: RoutingTable -> Node -> RoutingTable
 uncheckedAdd (RoutingTable { bucket, nodes }) node =
     RoutingTable
-        { bucket = insert (nodeid :: Word160) bucket
+        { bucket = insert nodeid bucket
         , nodes = Map.insert nodeid node nodes
         }
 
@@ -90,11 +87,7 @@ exists rd nodeinfo = Map.member (nodeId nodeinfo) (nodes rd)
 initRoutingTable :: NodeID -> RoutingTable
 initRoutingTable nodeid = RoutingTable bucket Map.empty
     where
-        bucket = Bucket nodeid bucketsize minword maxword Set.empty
-        minword = Word160 i i i i i
-        maxword = Word160 j j j j j
-        i = minBound :: Word32
-        j = maxBound :: Word32
+        bucket = Bucket nodeid bucketsize 0 (2^160) Set.empty
 
 
 getOwnId :: RoutingTable -> NodeID
