@@ -36,8 +36,6 @@ import Network.KRPC.InternalConstants
     )
 import Network.KRPC.Helpers (hexify)
 
-import Debug.Trace (traceShowId)
-
 --
 -- TODO: Quickcheck on arbitrary KPackets
 data KPacket = KPacket
@@ -66,7 +64,7 @@ instance BEncode KPacket where
         = either
             (Left . show)
             Right
-            (runP kparser () "Inbound" (traceShowId $ scanner bvalue))
+            (runP kparser () "Inbound" (scanner bvalue))
 
 
 
@@ -239,8 +237,8 @@ qparser = do
 qdatparser :: Parser QueryDat
 qdatparser
     =   (FindNode <$> findNode)
+    <|> (try announcePeer)
     <|> (GetPeers <$> getPeers)
-    <|> announcePeer
     <|> return Ping
 
     where
@@ -250,10 +248,8 @@ qdatparser
 
         announcePeer = do
             flag <- option False impliedPort
-            isBs (stringpack "info_hash")
-            try (announcePeerB flag)
 
-        announcePeerB flag = do
+            isBs (stringpack "info_hash")
             info_hash <- parseNodeid
 
             isBs (stringpack "port")
@@ -265,8 +261,7 @@ qdatparser
             return $ AnnouncePeer flag info_hash port token
 
         impliedPort
-            = (/=) 0
-            <$> (isBs (stringpack "implied_port") >> try parseInt)
+            = (/=) 0 <$> (isBs (stringpack "implied_port") >> parseInt)
 
 
 parseInt :: Parser Integer

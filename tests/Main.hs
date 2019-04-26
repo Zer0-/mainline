@@ -31,7 +31,7 @@ import Network.KRPC.InternalConstants
 
 import Network.Transport.Internal (decodeWord16, decodeWord32)
 
-import Debug.Trace
+--import Debug.Trace
 
 prop_fits :: Word32 -> Int -> Word32 -> Word32 -> Word32 -> Bool
 prop_fits bid size bmin bmax value =
@@ -189,7 +189,7 @@ fmt_decodeFindNodeQuery i n t =
         target = pack t
 
 fmt_decodeNodesResponse :: [Word8] -> [Word8] -> [Word8] -> Bool
-fmt_decodeNodesResponse t i ns = traceShowId (fromBEncode bval) == traceShowId expected
+fmt_decodeNodesResponse t i ns = fromBEncode bval == expected
     where
         tid = pack t
         nid = pack i
@@ -301,7 +301,7 @@ fmt_decodeAnnoucePeerQuery
     -> [Word8]
     -> [Word8]
     -> [Word8]
-    -> [Word8]
+    -> Integer
     -> Bool
     -> Integer
     -> Bool
@@ -320,7 +320,7 @@ fmt_decodeAnnoucePeerQuery
                     singleton bs_id (BString $ pack i)
                     `union` impliedPort
                     `union` singleton (stringpack "info_hash") (BString $ pack nfo)
-                    `union` singleton (stringpack "port") (BString $ pack pval)
+                    `union` singleton (stringpack "port") (BInteger pval)
                     `union` singleton (stringpack "token") (BString $ pack token))
                 `union` bd "q" "announce_peer"
                 `union` bd "y" "q"
@@ -332,9 +332,9 @@ fmt_decodeAnnoucePeerQuery
                         tid
                         ( Query (fromOctets i)
                             ( AnnouncePeer
-                                (impliedPortArg == True && impliedPortVal == 1)
+                                (impliedPortArg == True && impliedPortVal /= 0)
                                 (fromOctets nfo)
-                                (fromOctets pval)
+                                (fromIntegral pval)
                                 (pack token)
                             )
                         )
