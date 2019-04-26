@@ -43,8 +43,6 @@ import Architecture.Internal.Types
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
 import Network.Octets (fromOctets)
 
-import Debug.Trace (trace)
-
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
 maxline :: Int
@@ -79,7 +77,7 @@ updateSubscriptions substates (Sub tsubs) = do
             close listenSocket
 
         unsub (UDPDat { boundSocket }) = do
-            trace "closing bound udp socket" close boundSocket
+            close boundSocket
 
         sub :: TSub msg -> IO (SubscriptionData msg)
         sub (TCP p f) = do
@@ -87,7 +85,7 @@ updateSubscriptions substates (Sub tsubs) = do
             return $ TCPDat p sock Nothing f
 
         sub (UDP p f) = do
-            sock <- trace "opening udp port" (openUDPPort p)
+            sock <- openUDPPort p
             return $ UDPDat p sock f
 
         unloads = substates `Map.withoutKeys` (Set.fromList tsubkeys)
@@ -151,16 +149,16 @@ openUDPPort = bindSocket Datagram
 
 
 readSubscriptions :: SubState msg -> IO (SubState msg, [ msg ])
-readSubscriptions x = trace ("readSubscriptions size x: " ++ (show $ Map.size x) ++ "  size assocs:" ++ (show $ length $ Map.assocs x)) $ ((foldM ff (Map.empty, [])) . Map.assocs) x
+readSubscriptions x = ((foldM ff (Map.empty, [])) . Map.assocs) x
     where
         ff ::
             (SubState msg, [ msg ]) ->
             (Int, SubscriptionData msg) ->
             IO (SubState msg, [ msg ])
-        ff (states, msgs) (key, value) = trace "readSubscriptions.ff" (
-            readSub value >>=
-                \(d, mmsg) ->
-                    return (Map.insert key d states, maybe msgs (: msgs) mmsg))
+        ff (states, msgs) (key, value)
+            = readSub value
+            >>= \(d, mmsg) ->
+                return (Map.insert key d states, maybe msgs (: msgs) mmsg)
 
 
 readSub :: SubscriptionData msg -> IO (SubscriptionData msg, Maybe msg)
@@ -169,7 +167,7 @@ readSub (TCPDat p lsnsc cnsc f) =
         closem cnsc
 
         (c, _) <- accept $ lsnsc
-        bytes <- trace "reading in from tcp socket" (recvAll BS.empty c)
+        bytes <- recvAll BS.empty c
         return (TCPDat p lsnsc (Just c) f, Just $ f bytes)
 
     where

@@ -26,8 +26,6 @@ import Architecture.Internal.Sub
     , openUDPPort
     )
 
-import Debug.Trace (trace)
-
 data TCmd msg
     = CmdLog String
     | CmdGetRandom (Float -> msg)
@@ -94,7 +92,7 @@ execTCmd states (CmdSendUDP srcPort dest bs) =
 
             getSock =
                 maybe
-                    ( trace ("opening udp port for send cmd on port " ++ show srcPort) (openUDPPort srcPort) >>=
+                    ((openUDPPort srcPort) >>=
                         \sock ->
                             return
                                 ( Map.insert
