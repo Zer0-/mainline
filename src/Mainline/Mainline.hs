@@ -3,6 +3,7 @@ module Mainline.Mainline
     , ServerConfig (..)
     , Action (..)
     , TransactionState (..)
+    , Transactions
     ) where
 
 import qualified Data.Map as Map
@@ -11,6 +12,7 @@ import Data.Time.Clock.POSIX (POSIXTime)
 
 import Network.KRPC.Types
     ( CompactInfo
+    , NodeInfo
     , NodeID
     , Port
     )
@@ -45,8 +47,10 @@ data Action = Warmup
 data TransactionState = TransactionState
     {  timeSent    :: POSIXTime
     ,  action      :: Action
-    ,  recipient   :: CompactInfo
+    ,  recipient   :: NodeInfo
     }
+
+type Transactions = Map.Map NodeID (Map.Map ByteString TransactionState)
 
 data ServerConfig = ServerConfig
     { listenPort       :: Port
@@ -56,8 +60,9 @@ data ServerConfig = ServerConfig
 
 data Model
     = Uninitialized
+    | Uninitialized1 NodeID
     | ServerState
-        { transactions     :: Map.Map ByteString TransactionState
+        { transactions     :: Transactions
         , conf             :: ServerConfig
         , routingTable     :: RoutingTable
         }

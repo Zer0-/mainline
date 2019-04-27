@@ -25,9 +25,6 @@ type Port = Word16
 
 type Token = ByteString
 
-
-
-
 data CompactInfo = CompactInfo
     { ip    :: Word32
     , port  :: Port
@@ -55,8 +52,6 @@ instance BEncode CompactInfo where
     fromBEncode = undefined
 
 
-
-
 data NodeInfo = NodeInfo
     { nodeId       :: NodeID
     , compactInfo  :: CompactInfo
@@ -80,8 +75,6 @@ instance Octets NodeInfo where
 instance BEncode NodeInfo where
     toBEncode = bEncode
     fromBEncode = undefined
-
-
 
 
 data Message
