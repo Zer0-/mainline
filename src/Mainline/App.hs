@@ -1,9 +1,10 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
-import Prelude hiding (init, log)
+import Prelude hiding (init, log, filter)
 import qualified Data.ByteString      as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map             as Map
+import Data.Set                      (Set, fromAscList, filter)
 import Data.Word                     (Word32)
 import Data.Maybe                    (isJust)
 import Data.BEncode                  (encode, decode)
@@ -116,7 +117,7 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
             prepareMsg
                 Warmup
                 (seedNode (conf initState))
-                (Query ourid Ping)
+                (Query ourid (FindNode ourid))
 
         ourid = ourId (conf initState)
 
@@ -146,7 +147,7 @@ update
             , conf
             , routingTable
             }
-        , Cmd.batch [ logmsg, logmsg2, sendCmd ]
+        , Cmd.batch [ logmsg, sendCmd ]
         )
 
         where
@@ -175,8 +176,6 @@ update
                 [ "Sending", show kpacket
                 , "(" ++ show bvalue ++ ") to", show sendRecipient ]
 
-            logmsg2 = Cmd.log Cmd.DEBUG [ "tid size:", show $ BS.length $ newtid]
-
 
 -- Receive a message
 update
@@ -199,7 +198,7 @@ update
                 (\t -> if (recipient t) == client then
                         Cmd.none
                     else
-                        Cmd.log Cmd.WARNING
+                        Cmd.log Cmd.INFO
                         [ "Client mismatch with state. Expected client "
                         , show $ recipient t
                         , " but received message from "
@@ -263,6 +262,7 @@ respond
 
 
 -- Handle Pong Response during Warmup
+{-
 respond
     sender
     (Right (TransactionState { action = Warmup }))
@@ -283,6 +283,8 @@ respond
             rt = routingTable model
             nodeinfo = NodeInfo nodeid sender
             ourid = (ourId (conf model))
+-}
+
 
 -- Respond to FindNode Response during Warmup
 respond
@@ -293,7 +295,6 @@ respond
     (ServerState { transactions, conf, routingTable })
     | willAdd routingTable node =
         (ServerState transactions conf newrt, cmds)
-        --(Uninitialized, cmds)
     | otherwise = (ServerState { transactions, conf, routingTable }, Cmd.none)
         where
             logmsg = Cmd.log Cmd.INFO [ "Adding to routing table:", show node ]
@@ -302,10 +303,7 @@ respond
                     routingTable
                     (Node now node Normal)
 
-            cmds = Cmd.batch $
-                [ logmsg
-                , Cmd.log Cmd.INFO (map show ninfos)
-                ] ++ sendCmds
+            cmds = Cmd.batch $ [ logmsg ] ++ sendCmds
 
             (newrt, sendCmds) =
                 foldl
@@ -314,7 +312,70 @@ respond
                         (considerNode now rt_ nodeinfo)
                     )
                     (rt, [])
-                    ninfos
+                    (filterNodes (ourId conf) $ fromAscList ninfos)
+
+
+respond
+    sender
+    (Right _)
+    _
+    (Response nid rdat)
+    model = (model, log)
+        where
+            log = Cmd.log Cmd.INFO
+                [ "Received unimplmented or unsupported response to our query from"
+                , show sender
+                , show (Response nid rdat)
+                ]
+
+
+respond
+    sender
+    (Right (TransactionState { recipient }))
+    _
+    (Query nid qdat)
+    model
+        | sender == recipient = (model, log)
+            where
+                log = Cmd.log Cmd.INFO
+                    [ "Ignoring a received Query instead of a response from"
+                    , show sender
+                    , show (Query nid qdat)
+                    ]
+
+respond
+    sender
+    (Left _)
+    _
+    (Response nid rdat)
+    model = (model, log)
+        where
+            log = Cmd.log Cmd.INFO
+                [ "Ignoring a response that wasn't in our transaction state from"
+                , show sender
+                , show (Response nid rdat)
+                ]
+
+respond
+    sender
+    _
+    _
+    (Error { errCode, errMsg })
+    model = (model, log)
+        where
+            log = Cmd.log Cmd.INFO
+                [ "Received an Error from"
+                , show sender
+                , (show errCode) ++ ": " ++ show errMsg
+                ]
+
+
+filterNodes :: NodeID -> Set NodeInfo -> Set NodeInfo
+filterNodes ourid = filter (\n ->
+        (\p -> (1 <= p) && (p <= 65535))
+        (port $ compactInfo n)
+        && (nodeId n) /= ourid
+        )
 
 
 -- Node has not yet been contacted

@@ -204,7 +204,14 @@ rdatparser
     <|> return Pong
 
     where
-        nodes = isBs (stringpack "nodes") >> parseBs
+        nodes = do
+            isBs (stringpack "nodes")
+            ns <- parseBs
+            optional (isBs bs_ip >> parseBs)
+            --some clients put this "p" param here
+            --seems to be a port value; purpose unknown
+            optional (isBs (stringpack "p") >> parseInt)
+            return ns
 
         peersFound = do
             token <- toke
