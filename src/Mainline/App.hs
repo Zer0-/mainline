@@ -39,6 +39,7 @@ import Mainline.Mainline
     , ServerConfig (..)
     , Action (..)
     , TransactionState (..)
+    , ServerState (..)
     , Transactions
     )
 
@@ -59,18 +60,6 @@ seedNodeInfo = CompactInfo seedNodeHost seedNodePort
 
 tidsize :: Int
 tidsize = 2
-
-createInitialState :: NodeID -> Model
-createInitialState newNodeId =
-    ServerState
-        { transactions = Map.empty
-        , conf = ServerConfig
-                { listenPort = servePort
-                , seedNode = seedNodeInfo
-                , ourId = newNodeId
-                }
-        , routingTable = initRoutingTable newNodeId
-        }
 
 data Msg
     = NewNodeId BS.ByteString
@@ -115,12 +104,16 @@ update (ErrorParsing compactinfo bytes errmsg) model = (model, logmsg)
 update (NewNodeId bs) Uninitialized = (initState, initialCmds)
     where
         initialCmds = Cmd.batch [ logmsg, pingSeed ]
-        initState = Uninitialized1 ourid
+        initState = Uninitialized1 conf
 
-        pingSeed =
-            prepareMsg
-                (seedNode (conf initState))
-                (Query ourid Ping)
+        conf = ServerConfig
+            { listenPort = servePort
+            , seedNode = seedNodeInfo
+            , ourId = ourid
+            }
+
+
+        pingSeed = prepareMsg seedNodeInfo (Query ourid Ping)
 
         ourid = (fromByteString bs)
 
@@ -136,8 +129,8 @@ update
         , body
         , newtid
         }
-    (ServerState { transactions, conf, routingTable }) =
-        ( ServerState { transactions, conf, routingTable }
+    (Uninitialized1 conf) =
+        ( Uninitialized1 conf
         , Cmd.batch [ logmsg, sendCmd ]
         )
 
@@ -162,8 +155,8 @@ update
         , newtid
         , when
         }
-    (ServerState { transactions, conf, routingTable }) =
-        ( ServerState
+    (Ready (ServerState { transactions, conf, routingTable })) =
+        ( Ready ServerState
             { transactions = trsns
             , conf
             , routingTable
@@ -205,15 +198,18 @@ update
         now
         client
         ( KPacket
-            { transactionId
-            , message = Response nodeid Pong
+            { message = Response nodeid Pong
             , version
             }
         )
     )
-    (Uninitialized1 ourid) = (model, warmup)
+    (Uninitialized1 conf) = (model, warmup)
         where
-            model = createInitialState ourid
+            model = Ready ServerState
+                { transactions = Map.empty
+                , conf = conf
+                , routingTable = initRoutingTable ourid
+                }
 
             warmup = prepareMsg2
                 now
@@ -221,12 +217,14 @@ update
                 (NodeInfo nodeid client)
                 (Query ourid (FindNode ourid))
 
+            ourid = ourId conf
+
 
 -- Receive a message
 update
     (Inbound now client (KPacket { transactionId, message, version }))
-    (ServerState { transactions, conf, routingTable }) =
-        ( newModel
+    (Ready ServerState { transactions, conf, routingTable }) =
+        ( Ready newState
         , Cmd.batch
             [ Cmd.log
                 Cmd.DEBUG
@@ -254,7 +252,7 @@ update
             mtState
                 = nodeid
                 >>= \nid -> Map.lookup nid transactions
-                >>= \trns -> Map.lookup transactionId trns
+                >>= Map.lookup transactionId
 
             nodeid = case message of
                 (Query nid _) -> Just nid
@@ -280,7 +278,7 @@ update
                 , routingTable
                 }
 
-            (newModel, cmd) = case message of
+            (newState, cmd) = case message of
                 (Query nid qdat) -> case mtState of
                     Nothing ->
                         respond
@@ -310,37 +308,50 @@ update
                 e ->
                     logErr client e state1
 
+
 respond
     :: NodeInfo
     -> BS.ByteString
     -> POSIXTime
     -> QueryDat
-    -> Model
-    -> (Model, Cmd.Cmd Msg)
+    -> ServerState
+    -> (ServerState, Cmd.Cmd Msg)
 -- Respond to Ping
 respond
     node
     transactionId
     now
     Ping
-    model
-    | exists (routingTable model) node = (model, pong)
-    | willAdd (routingTable model) node =
-        (model { routingTable = rt }, Cmd.batch [log, cmds, pong])
-    | otherwise = (model, pong)
+    state
+    | exists (routingTable state) node = (state, pong)
+    | willAdd (routingTable state) node =
+        (newModel, Cmd.batch [log, cmds, pong])
+    | otherwise = (state, pong)
         where
             pong =
                 Cmd.sendUDP
-                    (listenPort (conf model))
+                    (listenPort (conf state))
                     (compactInfo node)
                     (BL.toStrict bvalue)
 
             kpacket = KPacket transactionId (Response ourid Pong) Nothing
-            ourid = (ourId (conf model))
-            (rt, cmds) = considerNode now (routingTable model) node
+            ourid = (ourId (conf state))
+            (newModel, cmds) = considerNode now state node
             log = Cmd.log Cmd.DEBUG [ "sending", show bvalue]
             bvalue = encode kpacket
 
+-- Ignore unimplemented requests (TODO: Implement them!)
+respond
+    node
+    _
+    _
+    qdat
+    state = (state, log)
+        where
+            log = Cmd.log Cmd.INFO
+                [ "Ignoring (unimplemented!) request from"
+                , show node, show qdat
+                ]
 
 
 handleResponse
@@ -348,41 +359,42 @@ handleResponse
     -> TransactionState
     -> POSIXTime
     -> ResponseDat
-    -> Model
-    -> (Model, Cmd.Cmd Msg)
+    -> ServerState
+    -> (ServerState, Cmd.Cmd Msg)
 -- Respond to FindNode Response during Warmup
 handleResponse
     node
     (TransactionState _ Warmup _)
     now
     (Nodes ninfos)
-    (ServerState { transactions, conf, routingTable })
-    | willAdd routingTable node =
-        (ServerState transactions conf newrt, cmds)
-    | otherwise = (ServerState { transactions, conf, routingTable }, Cmd.none)
+    state
+    | willAdd initialRt node = (newstate, cmds)
+    | otherwise = (state, Cmd.none)
         where
             logmsg = Cmd.log Cmd.INFO [ "Adding to routing table:", show node ]
             rt = uncheckedAdd
-                    routingTable
+                    initialRt
                     (Node now node Normal)
+
+            initialRt = routingTable state
 
             cmds = Cmd.batch $ [ logmsg ] ++ sendCmds
 
-            (newrt, sendCmds) =
+            (newstate, sendCmds) =
                 foldl
                     ( \(rt_, l) nodeinfo ->
                         (\(rt__, cmd) -> (rt__, l ++ [cmd]))
                         (considerNode now rt_ nodeinfo)
                     )
-                    (rt, [])
+                    (state { routingTable = rt }, [])
                     ( filter
-                        (filterNodes transactions (ourId conf))
+                        (filterNodes (ourId $ conf state))
                         (fromAscList ninfos)
                     )
 
 
-logHelper :: NodeInfo -> Message -> String -> Model -> (Model, Cmd.Cmd Msg)
-logHelper sender msg logstr model  = (model, log)
+logHelper :: NodeInfo -> Message -> String -> ServerState -> (ServerState, Cmd.Cmd Msg)
+logHelper sender msg logstr state  = (state, log)
             where
                 log = Cmd.log Cmd.INFO
                     [ logstr
@@ -391,11 +403,11 @@ logHelper sender msg logstr model  = (model, log)
                     ]
 
 
-logErr :: CompactInfo -> Message -> Model -> (Model, Cmd.Cmd Msg)
+logErr :: CompactInfo -> Message -> ServerState -> (ServerState, Cmd.Cmd Msg)
 logErr
     sender
     (Error { errCode, errMsg })
-    model = (model, log)
+    state = (state, log)
         where
             log = Cmd.log Cmd.INFO
                 [ "Received an Error from"
@@ -403,11 +415,11 @@ logErr
                 , (show errCode) ++ ": " ++ show errMsg
                 ]
 
-logErr _ _ model = (model, Cmd.none)
+logErr _ _ state = (state, Cmd.none)
 
 
-filterNodes :: Transactions -> NodeID -> NodeInfo -> Bool
-filterNodes _ ourid node
+filterNodes :: NodeID -> NodeInfo -> Bool
+filterNodes ourid node
     =  (1 <= p)
     && (p <= 65535)
     && nodeId node /= ourid
@@ -416,25 +428,33 @@ filterNodes _ ourid node
         p = (port $ compactInfo node)
 
 
-
 -- Node has not yet been contacted
 considerNode
     :: POSIXTime
-    -> RoutingTable
+    -> ServerState
     -> NodeInfo
-    -> (RoutingTable, Cmd.Cmd Msg)
-considerNode now rt nodeinfo
-    | exists rt nodeinfo =  (rt, Cmd.none)
-    | willAdd rt nodeinfo = (rt, pingThem)
-    | otherwise =           (rt, Cmd.none)
+    -> (ServerState, Cmd.Cmd Msg)
+considerNode now state node
+    | exists rt node = (state, Cmd.none)
+    | notr && willAdd rt node =       (state, pingThem)
+    | otherwise =                        (state, Cmd.none)
         where
+            notr = (maybe True
+                (Map.null . Map.filter filterfunk)
+                (Map.lookup (nodeId node) (transactions state)))
+
+            filterfunk tstate = action tstate == Warmup
+
+            rt = routingTable state
+
             pingThem =
                 prepareMsg2
                     now
                     Warmup
-                    nodeinfo
+                    node
                     (Query ourid (FindNode ourid))
-            ourid = getOwnId rt
+
+            ourid = getOwnId $ routingTable state
     -- node exists in rt => (Model, Cmd.none)
     -- node can be added (bucket not full or ourid in bucket) => send message
     -- if nodes where lastMsgTime < (now - 15m) || status == BeingChecked
@@ -479,7 +499,9 @@ parseReceivedBytes compactinfo (Received { bytes, time }) =
 
 subscriptions :: Model -> Sub Msg
 subscriptions Uninitialized = Sub.none
-subscriptions (ServerState { conf = ServerConfig { listenPort } }) =
+subscriptions (Uninitialized1 (ServerConfig { listenPort })) =
+    Sub.udp listenPort parseReceivedBytes
+subscriptions (Ready (ServerState { conf = ServerConfig { listenPort } })) =
     Sub.udp listenPort parseReceivedBytes
 
 

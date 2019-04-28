@@ -118,7 +118,7 @@ instance Show QueryDat where
 
     show (FindNode nid) = "<FindNode " ++ show nid ++ ">"
 
-    show (GetPeers ifo) = "<GetPeers " ++ show ifo ++ ">"
+    show (GetPeers ifo) = "<GetPeers info_hash:" ++ show ifo ++ ">"
 
     show (AnnouncePeer b ifo p token)
         = "<AnnouncePeer implied_port: " ++ show b

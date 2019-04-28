@@ -3,6 +3,7 @@ module Mainline.Mainline
     , ServerConfig (..)
     , Action (..)
     , TransactionState (..)
+    , ServerState (..)
     , Transactions
     ) where
 
@@ -18,7 +19,7 @@ import Network.KRPC.Types
     )
 import Mainline.RoutingTable (RoutingTable)
 
-data Action = Warmup
+data Action = Warmup deriving Eq
 
 
 {-
@@ -40,7 +41,7 @@ data Action = Warmup
  -
  - MILESTONE:
  -
- -   - Repeatedly issue find_nodes to closer and closer nodes, until completion
+ -   - Repeatedly issue find_nodes to closer and closer nodes, until completion ✓
  -}
 
 
@@ -58,11 +59,13 @@ data ServerConfig = ServerConfig
     , ourId            :: NodeID
     }
 
+data ServerState = ServerState
+    { transactions     :: Transactions
+    , conf             :: ServerConfig
+    , routingTable     :: RoutingTable
+    }
+
 data Model
     = Uninitialized
-    | Uninitialized1 NodeID
-    | ServerState
-        { transactions     :: Transactions
-        , conf             :: ServerConfig
-        , routingTable     :: RoutingTable
-        }
+    | Uninitialized1 ServerConfig
+    | Ready ServerState

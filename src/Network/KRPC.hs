@@ -205,9 +205,9 @@ rdatparser
 
     where
         nodes = do
+            optional (isBs bs_ip >> parseBs)
             isBs (stringpack "nodes")
             ns <- parseBs
-            optional (isBs bs_ip >> parseBs)
             --some clients put this "p" param here
             --seems to be a port value; purpose unknown
             optional (isBs (stringpack "p") >> parseInt)
