@@ -109,6 +109,7 @@ update (ErrorParsing compactinfo bytes errmsg) model = (model, logmsg)
             (\bval -> ["scanner:", show $ scanner bval])
             (decode bytes)
 
+
 -- Get new node id. Init server state, request tid for pinging seed node
 update (NewNodeId bs) Uninitialized = (initState, initialCmds)
     where
@@ -160,6 +161,7 @@ update
                     (BL.toStrict $ encode kpacket)
 
             kpacket = KPacket newtid body Nothing
+
 
 -- Get tid for outound Message
 update
@@ -239,6 +241,7 @@ update
 
             ourid = ourId conf
 
+
 update (SendResponse { targetNode, body, tid }) (Ready s) =
     ( Ready s
     , Cmd.batch [ logmsg, sendCmd ]
@@ -258,7 +261,6 @@ update (SendResponse { targetNode, body, tid }) (Ready s) =
         logmsg = Cmd.log Cmd.DEBUG
             [ "Sending", show kpacket
             , "(" ++ show bvalue ++ ") to", show targetNode ]
-
 
 
 -- Receive a message
@@ -366,7 +368,7 @@ respond
     state
     | exists (routingTable state) node = (state, pong)
     | willAdd (routingTable state) node =
-        (newModel, Cmd.batch [log, cmds, pong])
+        (newstate, Cmd.batch [log, cmds, pong])
     | otherwise = (state, pong)
         where
             pong =
@@ -377,7 +379,7 @@ respond
 
             kpacket = KPacket tid (Response ourid Pong) Nothing
             ourid = (ourId (conf state))
-            (newModel, cmds) = considerNode now state node
+            (newstate, cmds) = considerNode now state node
             log = Cmd.log Cmd.DEBUG [ "sending", show bvalue]
             bvalue = encode kpacket
 
@@ -385,17 +387,52 @@ respond
 respond
     node
     tid
-    _
+    now
     (GetPeers infohash)
-    state = (state, cmd)
+    state
+        | exists (routingTable state) node = (state, cmd)
+        | willAdd (routingTable state) node = (newstate, Cmd.batch [cmd, cmds])
+        | otherwise = (state, cmd)
         where
             cmd = Cmd.randomBytes
                 tokensize
-                (\t -> SendResponse node (Response ourid (NodesFound t closest)) tid)
+                (\t -> SendResponse
+                    node
+                    (Response ourid (NodesFound t closest))
+                    tid
+                )
 
             ourid = getOwnId $ routingTable state
 
             closest = nclosest infohash 8 (routingTable state)
+
+            (newstate, cmds) = considerNode now state node
+
+
+respond
+    node
+    tid
+    _
+    (AnnouncePeer _ info _ _)
+    state = (state, Cmd.batch [logmsg, sendCmd])
+        where
+            sendCmd =
+                Cmd.sendUDP
+                    (listenPort $ conf state)
+                    (compactInfo node)
+                    (BL.toStrict bvalue)
+
+            kpacket = KPacket tid (Response ourid Pong) Nothing
+
+            ourid = ourId $ conf state
+
+            bvalue = encode kpacket
+
+            logmsg = Cmd.log Cmd.INFO
+                [ "Got Peer announcement ", "info_hash:", show info
+                , "replying with Pong to", show node
+                ]
+
 
 
 -- Ignore unimplemented requests (TODO: Implement them!)
@@ -512,7 +549,7 @@ considerNode now state node
                     }
                 )
 
-            ourid = getOwnId $ routingTable state
+            ourid = ourId $ conf state
     -- node exists in rt => (Model, Cmd.none)
     -- node can be added (bucket not full or ourid in bucket) => send message
     -- if nodes where lastMsgTime < (now - 15m) || status == BeingChecked
