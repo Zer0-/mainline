@@ -24,6 +24,7 @@ import Mainline.RoutingTable
     , exists
     , willAdd
     , getOwnId
+    , nclosest
     )
 import Network.KRPC.Types
     ( Port
@@ -61,6 +62,9 @@ seedNodeInfo = CompactInfo seedNodeHost seedNodePort
 tidsize :: Int
 tidsize = 2
 
+tokensize :: Int
+tokensize = 8
+
 data Msg
     = NewNodeId BS.ByteString
     | Inbound POSIXTime CompactInfo KPacket
@@ -76,6 +80,11 @@ data Msg
         , body          :: Message
         , newtid        :: BS.ByteString
         , when          :: POSIXTime
+        }
+    | SendResponse
+        { targetNode    :: NodeInfo
+        , body          :: Message
+        , tid           :: BS.ByteString
         }
 
 
@@ -112,8 +121,14 @@ update (NewNodeId bs) Uninitialized = (initState, initialCmds)
             , ourId = ourid
             }
 
-
-        pingSeed = prepareMsg seedNodeInfo (Query ourid Ping)
+        pingSeed = Cmd.randomBytes
+            tidsize
+            (\t -> SendFirstMessage
+                { sendRecipient = seedNodeInfo
+                , body          = (Query ourid Ping)
+                , newtid        = t
+                }
+            )
 
         ourid = (fromByteString bs)
 
@@ -211,13 +226,39 @@ update
                 , routingTable = initRoutingTable ourid
                 }
 
-            warmup = prepareMsg2
-                now
-                Warmup
-                (NodeInfo nodeid client)
-                (Query ourid (FindNode ourid))
+            warmup = Cmd.randomBytes
+                tidsize
+                (\newid -> SendMessage
+                    { sendAction = Warmup
+                    , targetNode = (NodeInfo nodeid client)
+                    , body       = (Query ourid (FindNode ourid))
+                    , newtid     = newid
+                    , when       = now
+                    }
+                )
 
             ourid = ourId conf
+
+update (SendResponse { targetNode, body, tid }) (Ready s) =
+    ( Ready s
+    , Cmd.batch [ logmsg, sendCmd ]
+    )
+
+    where
+        sendCmd =
+            Cmd.sendUDP
+                (listenPort $ conf s)
+                (compactInfo targetNode)
+                (BL.toStrict bvalue)
+
+        kpacket = KPacket tid body Nothing
+
+        bvalue = encode kpacket
+
+        logmsg = Cmd.log Cmd.DEBUG
+            [ "Sending", show kpacket
+            , "(" ++ show bvalue ++ ") to", show targetNode ]
+
 
 
 -- Receive a message
@@ -319,7 +360,7 @@ respond
 -- Respond to Ping
 respond
     node
-    transactionId
+    tid
     now
     Ping
     state
@@ -334,11 +375,28 @@ respond
                     (compactInfo node)
                     (BL.toStrict bvalue)
 
-            kpacket = KPacket transactionId (Response ourid Pong) Nothing
+            kpacket = KPacket tid (Response ourid Pong) Nothing
             ourid = (ourId (conf state))
             (newModel, cmds) = considerNode now state node
             log = Cmd.log Cmd.DEBUG [ "sending", show bvalue]
             bvalue = encode kpacket
+
+
+respond
+    node
+    tid
+    _
+    (GetPeers infohash)
+    state = (state, cmd)
+        where
+            cmd = Cmd.randomBytes
+                tokensize
+                (\t -> SendResponse node (Response ourid (NodesFound t closest)) tid)
+
+            ourid = getOwnId $ routingTable state
+
+            closest = nclosest infohash 8 (routingTable state)
+
 
 -- Ignore unimplemented requests (TODO: Implement them!)
 respond
@@ -387,10 +445,7 @@ handleResponse
                         (considerNode now rt_ nodeinfo)
                     )
                     (state { routingTable = rt }, [])
-                    ( filter
-                        (filterNodes (ourId $ conf state))
-                        (fromAscList ninfos)
-                    )
+                    (filter filterNodes (fromAscList ninfos))
 
 
 logHelper :: NodeInfo -> Message -> String -> ServerState -> (ServerState, Cmd.Cmd Msg)
@@ -418,11 +473,10 @@ logErr
 logErr _ _ state = (state, Cmd.none)
 
 
-filterNodes :: NodeID -> NodeInfo -> Bool
-filterNodes ourid node
+filterNodes ::  NodeInfo -> Bool
+filterNodes node
     =  (1 <= p)
     && (p <= 65535)
-    && nodeId node /= ourid
 
     where
         p = (port $ compactInfo node)
@@ -436,57 +490,33 @@ considerNode
     -> (ServerState, Cmd.Cmd Msg)
 considerNode now state node
     | exists rt node = (state, Cmd.none)
-    | notr && willAdd rt node =       (state, pingThem)
-    | otherwise =                        (state, Cmd.none)
+    | notransaction && willAdd rt node = (state, pingThem)
+    | otherwise = (state, Cmd.none)
         where
-            notr = (maybe True
+            notransaction = (maybe True
                 (Map.null . Map.filter filterfunk)
                 (Map.lookup (nodeId node) (transactions state)))
 
-            filterfunk tstate = action tstate == Warmup
+            filterfunk = (== Warmup) . action
 
             rt = routingTable state
 
-            pingThem =
-                prepareMsg2
-                    now
-                    Warmup
-                    node
-                    (Query ourid (FindNode ourid))
+            pingThem = Cmd.randomBytes
+                tidsize
+                (\newid -> SendMessage
+                    { sendAction = Warmup
+                    , targetNode = node
+                    , body       = (Query ourid (FindNode ourid))
+                    , newtid     = newid
+                    , when       = now
+                    }
+                )
 
             ourid = getOwnId $ routingTable state
     -- node exists in rt => (Model, Cmd.none)
     -- node can be added (bucket not full or ourid in bucket) => send message
     -- if nodes where lastMsgTime < (now - 15m) || status == BeingChecked
     --      then send command or modify TransactionState
-
-
--- This is used for when we want to send a message but do not have the current
--- time.
-prepareMsg :: CompactInfo -> Message -> Cmd.Cmd Msg
-prepareMsg compactinfo body =
-        Cmd.randomBytes
-        tidsize
-        (\t -> SendFirstMessage
-            { sendRecipient = compactinfo
-            , body          = body
-            , newtid        = t
-            }
-        )
-
-prepareMsg2 :: POSIXTime -> Action -> NodeInfo -> Message -> Cmd.Cmd Msg
-prepareMsg2 now action node body =
-    Cmd.randomBytes
-    tidsize
-    (\newid -> SendMessage
-        { sendAction = action
-        , targetNode = node
-        , body       = body
-        , newtid     = newid
-        , when       = now
-        }
-    )
-
 
 
 parseReceivedBytes :: CompactInfo -> Received -> Msg

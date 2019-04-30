@@ -9,10 +9,13 @@ module Mainline.RoutingTable
     , exists
     , getOwnId
     , willAdd
+    , nclosest
     ) where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import Data.List (sortBy)
+import Data.Bits (xor)
 import Data.Time.Clock.POSIX (POSIXTime)
 
 import Mainline.Bucket
@@ -77,7 +80,9 @@ changeNode f k rt = rt { nodes = Map.adjust f k (nodes rt) }
 
 
 willAdd :: RoutingTable -> NodeInfo -> Bool
-willAdd rt nodeinfo = willInsert (nodeId nodeinfo) (bucket rt)
+willAdd rt nodeinfo = nid /= (getOwnId rt) && willInsert nid (bucket rt)
+    where
+        nid = (nodeId nodeinfo)
 
 
 exists :: RoutingTable -> NodeInfo -> Bool
@@ -92,3 +97,17 @@ initRoutingTable nodeid = RoutingTable bucket Map.empty
 
 getOwnId :: RoutingTable -> NodeID
 getOwnId = getId . bucket
+
+
+nclosest :: NodeID -> Int -> RoutingTable -> [NodeInfo]
+nclosest nid n rt = map info $ take n $ sortBy f $ Map.elems $ nodes rt
+    where
+        f i j = g (getid i) (getid j)
+
+        g i j
+            | i == j                    = EQ
+            | nid `xor` i < nid `xor` j = LT
+            | otherwise                 = GT
+
+
+        getid = (nodeId . info)
