@@ -14,6 +14,7 @@ import Crypto.Random.DRBG (CtrDRBG)
 import Network.Socket (SockAddr (..), tupleToHostAddress)
 import Network.Socket.ByteString (sendTo)
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
+import System.IO (hFlush, stdout)
 
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
 import Network.Octets (octets)
@@ -46,7 +47,7 @@ execTCmd states (CmdGetRandom f) =
 execTCmd states (CmdGetTime f) =
     getPOSIXTime >>= \t -> return (states, Just $ f t)
 
-execTCmd states (CmdLog msg) = putStr msg >> return (states, Nothing)
+execTCmd states (CmdLog msg) = putStr msg >> hFlush stdout >> return (states, Nothing)
 
 execTCmd states (CmdRandomBytes n f) =
     do
