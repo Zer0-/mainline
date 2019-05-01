@@ -7,9 +7,9 @@ module Mainline.RoutingTable
     , initRoutingTable
     , uncheckedAdd
     , exists
-    , getOwnId
     , willAdd
     , nclosest
+    , changeNode
     ) where
 
 import qualified Data.Map as Map

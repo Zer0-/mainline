@@ -16,14 +16,12 @@ import Architecture.Sub              (Sub, Received (..))
 import Network.KRPC                  (KPacket (..), scanner)
 import Network.Octets                (Octets (..), fromByteString)
 import Mainline.RoutingTable
-    ( RoutingTable
-    , initRoutingTable
+    ( initRoutingTable
     , uncheckedAdd
     , Node (..)
     , NodeStatus (..)
     , exists
     , willAdd
-    , getOwnId
     , nclosest
     )
 import Network.KRPC.Types
@@ -33,7 +31,6 @@ import Network.KRPC.Types
     , QueryDat    (..)
     , ResponseDat (..)
     , NodeInfo    (..)
-    , NodeID
     )
 import Mainline.Mainline
     ( Model (..)
@@ -41,7 +38,6 @@ import Mainline.Mainline
     , Action (..)
     , TransactionState (..)
     , ServerState (..)
-    , Transactions
     )
 
 servePort :: Port
@@ -60,7 +56,7 @@ seedNodeInfo :: CompactInfo
 seedNodeInfo = CompactInfo seedNodeHost seedNodePort
 
 tidsize :: Int
-tidsize = 2
+tidsize = 4
 
 tokensize :: Int
 tokensize = 8
@@ -207,18 +203,14 @@ update
 
             logmsg = Cmd.log Cmd.DEBUG
                 [ "Sending", show kpacket
-                , "(" ++ show bvalue ++ ") to", show targetNode ]
+                , show targetNode ]
 
 
 update
     ( Inbound
         now
         client
-        ( KPacket
-            { message = Response nodeid Pong
-            , version
-            }
-        )
+        (KPacket { message = Response nodeid Pong })
     )
     (Uninitialized1 conf) = (model, warmup)
         where
@@ -366,24 +358,63 @@ respond
     now
     Ping
     state
-    | exists (routingTable state) node = (state, pong)
+    | exists (routingTable state) node = (state, cmd)
     | willAdd (routingTable state) node =
-        (newstate, Cmd.batch [log, cmds, pong])
-    | otherwise = (state, pong)
+        (newstate, Cmd.batch [cmd, cmds])
+    | otherwise = (state, cmd)
         where
             pong =
                 Cmd.sendUDP
                     (listenPort (conf state))
                     (compactInfo node)
-                    (BL.toStrict bvalue)
+                    (BL.toStrict $ encode kpacket)
+
+            cmd = Cmd.batch [log, pong]
 
             kpacket = KPacket tid (Response ourid Pong) Nothing
+
             ourid = (ourId (conf state))
+
             (newstate, cmds) = considerNode now state node
-            log = Cmd.log Cmd.DEBUG [ "sending", show bvalue]
-            bvalue = encode kpacket
+
+            log = Cmd.log Cmd.DEBUG
+                [ "sending", show kpacket
+                , "to", show node]
 
 
+-- Respond to FindNode query
+respond
+    node
+    tid
+    now
+    (FindNode nodeid)
+    state
+        | exists (routingTable state) node = (state, cmd)
+        | willAdd (routingTable state) node = (newstate, Cmd.batch [cmd, cmds])
+        | otherwise = (state, cmd)
+        where
+            nodes = Cmd.sendUDP
+                    (listenPort $ conf state)
+                    (compactInfo node)
+                    (BL.toStrict (encode kpacket))
+
+            cmd = Cmd.batch [logmsg, nodes]
+
+            kpacket = KPacket tid response Nothing
+
+            logmsg = Cmd.log Cmd.DEBUG
+                [ "Sending", show kpacket
+                , "to", show node ]
+
+            response = Response ourid (Nodes closest)
+
+            ourid = ourId $ conf state
+
+            closest = nclosest nodeid 8 (routingTable state)
+
+            (newstate, cmds) = considerNode now state node
+
+-- Respond to GetPeers query
 respond
     node
     tid
@@ -402,13 +433,14 @@ respond
                     tid
                 )
 
-            ourid = getOwnId $ routingTable state
+            ourid = ourId $ conf state
 
             closest = nclosest infohash 8 (routingTable state)
 
             (newstate, cmds) = considerNode now state node
 
 
+-- Respond to AnnouncePeer query
 respond
     node
     tid
@@ -434,21 +466,6 @@ respond
                 ]
 
 
-
--- Ignore unimplemented requests (TODO: Implement them!)
-respond
-    node
-    _
-    _
-    qdat
-    state = (state, log)
-        where
-            log = Cmd.log Cmd.INFO
-                [ "Ignoring (unimplemented!) request from"
-                , show node, show qdat
-                ]
-
-
 handleResponse
     :: NodeInfo
     -> TransactionState
@@ -463,6 +480,7 @@ handleResponse
     now
     (Nodes ninfos)
     state
+    | exists (routingTable state) node = (state, Cmd.none)
     | willAdd initialRt node = (newstate, cmds)
     | otherwise = (state, Cmd.none)
         where
@@ -483,6 +501,19 @@ handleResponse
                     )
                     (state { routingTable = rt }, [])
                     (filter filterNodes (fromAscList ninfos))
+
+-- Ignore the rest for now
+handleResponse
+    node
+    _
+    _
+    rdat
+    state = (state, log)
+        where
+            log = Cmd.log Cmd.INFO
+                [ "Ignoring unsolicited response from"
+                , show node, show rdat
+                ]
 
 
 logHelper :: NodeInfo -> Message -> String -> ServerState -> (ServerState, Cmd.Cmd Msg)

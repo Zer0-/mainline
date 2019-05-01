@@ -46,23 +46,23 @@ data Action = Warmup deriving Eq
 
 
 data TransactionState = TransactionState
-    {  timeSent    :: POSIXTime
-    ,  action      :: Action
-    ,  recipient   :: NodeInfo
+    {  timeSent  :: POSIXTime
+    ,  action    :: Action
+    ,  recipient :: NodeInfo
     }
 
 type Transactions = Map.Map NodeID (Map.Map ByteString TransactionState)
 
 data ServerConfig = ServerConfig
-    { listenPort       :: Port
-    , seedNode         :: CompactInfo
-    , ourId            :: NodeID
+    { listenPort :: Port
+    , seedNode   :: CompactInfo
+    , ourId      :: NodeID
     }
 
 data ServerState = ServerState
-    { transactions     :: Transactions
-    , conf             :: ServerConfig
-    , routingTable     :: RoutingTable
+    { transactions :: Transactions
+    , conf         :: ServerConfig
+    , routingTable :: RoutingTable
     }
 
 data Model
