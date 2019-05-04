@@ -304,8 +304,13 @@ update
 
             mkstate2 = \nid -> ServerState
                 { transactions = (
-                    Map.adjust
-                        (Map.delete transactionId)
+                    Map.update
+                        ( \trsns ->
+                            let
+                                ts = Map.delete transactionId trsns
+                            in
+                                if Map.null ts then Nothing else Just ts
+                        )
                         nid
                         transactions
                     )
