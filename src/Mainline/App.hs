@@ -36,6 +36,7 @@ subscriptions m
 
 update :: M.Msg -> Model -> (Model, Cmd M.Msg)
 update (M.NewNodeId ix bs) m = updateExplicit (M.NewNodeId ix bs) m ix
+update (M.ErrorParsing ci bs err) m = (m, M.logParsingErr ci bs err)
 
 updateExplicit :: M.Msg -> Model -> Int -> (Model, Cmd M.Msg)
 updateExplicit msg m ix = (m // [(ix, mm)], cmds)

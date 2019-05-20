@@ -104,19 +104,22 @@ data Msg
     | Inbound POSIXTime CompactInfo KPacket
     | ErrorParsing CompactInfo ByteString String
     | SendFirstMessage
-        { sendRecipient :: CompactInfo
+        { idx           :: Int
+        , sendRecipient :: CompactInfo
         , body          :: Message
         , newtid        :: ByteString
         }
     | SendMessage
-        { sendAction    :: Action
+        { idx           :: Int
+        , sendAction    :: Action
         , targetNode    :: NodeInfo
         , body          :: Message
         , newtid        :: ByteString
         , when          :: POSIXTime
         }
     | SendResponse
-        { targetNode    :: NodeInfo
+        { idx           :: Int
+        , targetNode    :: NodeInfo
         , body          :: Message
         , tid           :: ByteString
         }
@@ -128,7 +131,8 @@ data ServerState = ServerState
     }
 
 data ServerConfig = ServerConfig
-    { listenPort :: Port
+    { index      :: Int
+    , listenPort :: Port
     , seedNode   :: CompactInfo
     , ourId      :: NodeID
     }
@@ -159,13 +163,14 @@ update :: Msg -> Model -> (Model, Cmd Msg)
 update (ErrorParsing ci bs err) model = (model, logParsingErr ci bs err)
 
 -- Get new node id. Init server state, request tid for pinging seed node
-update (NewNodeId _ bs) Uninitialized = (initState, initialCmds)
+update (NewNodeId ix bs) Uninitialized = (initState, initialCmds)
     where
         initialCmds = Cmd.batch [ logmsg, pingSeed ]
         initState = Uninitialized1 conf
 
         conf = ServerConfig
-            { listenPort = servePort
+            { index = ix
+            , listenPort = servePort
             , seedNode = seedNodeInfo
             , ourId = ourid
             }
@@ -173,7 +178,8 @@ update (NewNodeId _ bs) Uninitialized = (initState, initialCmds)
         pingSeed = Cmd.randomBytes
             tidsize
             (\t -> SendFirstMessage
-                { sendRecipient = seedNodeInfo
+                { idx           = ix
+                , sendRecipient = seedNodeInfo
                 , body          = (Query ourid Ping)
                 , newtid        = t
                 }
@@ -275,7 +281,8 @@ update
             warmup = Cmd.randomBytes
                 tidsize
                 (\newid -> SendMessage
-                    { sendAction = Warmup
+                    { idx        = index conf
+                    , sendAction = Warmup
                     , targetNode = (NodeInfo nodeid client)
                     , body       = (Query ourid (FindNode ourid))
                     , newtid     = newid
@@ -493,6 +500,7 @@ respond
             cmd = Cmd.randomBytes
                 tokensize
                 (\t -> SendResponse
+                    (index $ conf state)
                     node
                     (Response ourid (NodesFound t closest))
                     tid
@@ -653,7 +661,8 @@ considerNode now state node
             pingThem = Cmd.randomBytes
                 tidsize
                 (\newid -> SendMessage
-                    { sendAction = Warmup
+                    { idx        = index $ conf state
+                    , sendAction = Warmup
                     , targetNode = node
                     , body       = (Query ourid (FindNode ourid))
                     , newtid     = newid
