@@ -91,7 +91,8 @@ executable Mainline
                    random,
                    text,
                    time,
-                   hashable
+                   hashable,
+                   array
   other-modules:
                    Architecture.Cmd
                    Architecture.Internal.Cmd
@@ -101,6 +102,7 @@ executable Mainline
                    Architecture.TEA
                    Mainline.Bucket
                    Mainline.RoutingTable
+                   Mainline.Mainline
                    Network.KRPC
                    Network.KRPC.Helpers
                    Network.KRPC.InternalConstants
@@ -109,7 +111,7 @@ executable Mainline
   hs-source-dirs:  src
   ghc-options:     -Wall -rtsopts
   default-language: Haskell2010
-  main-is:         Mainline/Mainline.hs
+  main-is:         Mainline/App.hs
 
 executable SendUDPHello
   build-depends:

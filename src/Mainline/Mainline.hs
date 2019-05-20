@@ -1,4 +1,13 @@
 {-# LANGUAGE NamedFieldPuns #-}
+module Mainline.Mainline
+    ( Model (..)
+    , Msg (..)
+    , update
+    , parseReceivedBytes
+    , servePort
+    , logParsingErr
+    ) where
+
 
 import Prelude hiding (init, log, filter)
 import Data.ByteString (ByteString)
@@ -10,6 +19,7 @@ import Data.BEncode                  (encode, decode)
 import Data.Time.Clock.POSIX         (POSIXTime)
 
 import Architecture.TEA              (Config (..), run)
+import Architecture.Cmd              (Cmd)
 import qualified Architecture.Cmd as Cmd
 import qualified Architecture.Sub as Sub
 import Architecture.Sub              (Sub, Received (..))
@@ -90,7 +100,7 @@ data Model
     | Ready ServerState
 
 data Msg
-    = NewNodeId ByteString
+    = NewNodeId Int ByteString
     | Inbound POSIXTime CompactInfo KPacket
     | ErrorParsing CompactInfo ByteString String
     | SendFirstMessage
@@ -140,30 +150,16 @@ main = run config
 config :: Config Model Msg
 config = Config init update subscriptions
 
-init :: (Model, Cmd.Cmd Msg)
-init = (Uninitialized, Cmd.randomBytes 20 NewNodeId)
+init :: (Model, Cmd Msg)
+init = (Uninitialized, Cmd.randomBytes 20 (NewNodeId 0))
 
 
-update :: Msg -> Model -> (Model, Cmd.Cmd Msg)
+update :: Msg -> Model -> (Model, Cmd Msg)
 -- Error Parsing
-update (ErrorParsing compactinfo bytes errmsg) model = (model, logmsg)
-    where
-        logmsg = Cmd.log Cmd.INFO $
-            [ "Could not parse received message. Sender:" , show (compactinfo)
-            , "in:" , show bytes
-            ]
-            ++ scnr ++
-            [ "reason:", errmsg
-            ]
-
-        scnr = either
-            (\_ -> [])
-            (\bval -> ["scanner:", show $ scanner bval])
-            (decode bytes)
-
+update (ErrorParsing ci bs err) model = (model, logParsingErr ci bs err)
 
 -- Get new node id. Init server state, request tid for pinging seed node
-update (NewNodeId bs) Uninitialized = (initState, initialCmds)
+update (NewNodeId _ bs) Uninitialized = (initState, initialCmds)
     where
         initialCmds = Cmd.batch [ logmsg, pingSeed ]
         initState = Uninitialized1 conf
@@ -419,7 +415,7 @@ respond
     -> POSIXTime
     -> QueryDat
     -> ServerState
-    -> (ServerState, Cmd.Cmd Msg)
+    -> (ServerState, Cmd Msg)
 -- Respond to Ping
 respond
     node
@@ -541,7 +537,7 @@ handleResponse
     -> POSIXTime
     -> ResponseDat
     -> ServerState
-    -> (ServerState, Cmd.Cmd Msg)
+    -> (ServerState, Cmd Msg)
 -- Respond to FindNode Response during Warmup
 handleResponse
     node
@@ -585,7 +581,7 @@ handleResponse
                 ]
 
 
-logHelper :: NodeInfo -> Message -> String -> ServerState -> (ServerState, Cmd.Cmd Msg)
+logHelper :: NodeInfo -> Message -> String -> ServerState -> (ServerState, Cmd Msg)
 logHelper sender msg logstr state  = (state, log)
             where
                 log = Cmd.log Cmd.INFO
@@ -595,7 +591,7 @@ logHelper sender msg logstr state  = (state, log)
                     ]
 
 
-logErr :: CompactInfo -> Message -> ServerState -> (ServerState, Cmd.Cmd Msg)
+logErr :: CompactInfo -> Message -> ServerState -> (ServerState, Cmd Msg)
 logErr
     sender
     (Error { errCode, errMsg })
@@ -608,6 +604,22 @@ logErr
                 ]
 
 logErr _ _ state = (state, Cmd.none)
+
+logParsingErr :: CompactInfo -> ByteString -> String -> Cmd Msg
+logParsingErr ci bs err =
+    Cmd.log Cmd.INFO $
+        [ "Could not parse received message. Sender:" , show ci
+        , "in:" , show bs
+        ]
+        ++ scnr ++
+        [ "reason:", err
+        ]
+
+    where
+        scnr = either
+            (\_ -> [])
+            (\bval -> ["scanner:", show $ scanner bval])
+            (decode bs)
 
 
 filterNodes ::  NodeInfo -> Bool
@@ -624,7 +636,7 @@ considerNode
     :: POSIXTime
     -> ServerState
     -> NodeInfo
-    -> (ServerState, Cmd.Cmd Msg)
+    -> (ServerState, Cmd Msg)
 considerNode now state node
     | exists rt node = (state, Cmd.none)
     | notransaction && willAdd rt node = (state, pingThem)
