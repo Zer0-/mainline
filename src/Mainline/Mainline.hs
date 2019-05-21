@@ -4,11 +4,13 @@ module Mainline.Mainline
     ( Model (..)
     , Msg (..)
     , ServerState (..)
+    , ServerConfig (..)
     , update
     , parseReceivedBytes
     , servePort
     , logParsingErr
     , logHelper
+    , logErr
     , getMTstate
     ) where
 
@@ -601,7 +603,7 @@ logHelper sender msg logstr state  = (state, log)
                     ]
 
 
-logErr :: CompactInfo -> Message -> ServerState -> (ServerState, Cmd Msg)
+logErr :: CompactInfo -> Message -> a -> (a, Cmd Msg)
 logErr
     sender
     (Error { errCode, errMsg })
@@ -649,10 +651,10 @@ considerNode
     -> (ServerState, Cmd Msg)
 considerNode now state node
     | exists rt node = (state, Cmd.none)
-    | notransaction && willAdd rt node = (state, pingThem)
+    | noOngoing && willAdd rt node = (state, pingThem)
     | otherwise = (state, Cmd.none)
         where
-            notransaction = (maybe True
+            noOngoing = (maybe True
                 (Map.null . Map.filter filterfunk)
                 (Map.lookup (nodeId node) (transactions state)))
 

@@ -3,7 +3,7 @@
 module Mainline.RoutingTable
     ( Node (..)
     , NodeStatus (..)
-    , RoutingTable
+    , RoutingTable (..)
     , initRoutingTable
     , uncheckedAdd
     , exists
@@ -16,6 +16,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.List (sortBy)
 import Data.Bits (xor)
+import Data.Function (on)
 import Data.Time.Clock.POSIX (POSIXTime)
 
 import Mainline.Bucket
@@ -86,7 +87,7 @@ willAdd rt nodeinfo = nid /= (getOwnId rt) && willInsert nid (bucket rt)
 
 
 exists :: RoutingTable -> NodeInfo -> Bool
-exists rd nodeinfo = Map.member (nodeId nodeinfo) (nodes rd)
+exists rt nodeinfo = Map.member (nodeId nodeinfo) (nodes rt)
 
 
 initRoutingTable :: NodeID -> RoutingTable
@@ -102,7 +103,7 @@ getOwnId = getId . bucket
 nclosest :: NodeID -> Int -> RoutingTable -> [NodeInfo]
 nclosest nid n rt = map info $ take n $ sortBy f $ Map.elems $ nodes rt
     where
-        f i j = g (getid i) (getid j)
+        f = g `on` getid
 
         g i j
             | i == j                    = EQ
