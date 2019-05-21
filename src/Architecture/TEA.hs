@@ -69,8 +69,8 @@ updateModelWithSubMsgs substates cfg =
           )
 
 
-run_ :: InternalState msg -> Config model msg -> IO ()
-run_ internalState cfg =
+run2 :: InternalState msg -> Config model msg -> IO ()
+run2 internalState cfg =
     do
         (internalState2, newcfg) <- runCmds internalState cfg
 
@@ -83,7 +83,7 @@ run_ internalState cfg =
             True -> return ()
             False ->
                 updateModelWithSubMsgs substates newcfg
-                >>= \(s, c) -> run_ (internalState2 { subState = s }) c
+                >>= \(s, c) -> run2 (internalState2 { subState = s }) c
 
 run :: Config model msg -> IO ()
-run = run_ (InternalState Map.empty)
+run = run2 (InternalState Map.empty)

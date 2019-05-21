@@ -80,8 +80,8 @@ word32_bytestring_conversion bs =
     where
         padded = take 4 (extendListWith bs 0)
 
-word160_bytestring_bijection :: [Word8] -> Bool
-word160_bytestring_bijection b = padded == (octets . word160FromOctets) padded
+integer_bytestring_bijection :: [Word8] -> Bool
+integer_bytestring_bijection b = padded == (octets . word160FromOctets) padded
     where
         padded = take 20 (extendListWith b 0)
         word160FromOctets = fromOctets :: [Word8] -> Integer
@@ -356,7 +356,7 @@ tests =
     , testGroup "Words Octets instance is reversable"
         [ testProperty "ByteString to Word16 is reversable"      word16_bytestring_bijection
         , testProperty "ByteString to Word32 is reversable"      word32_bytestring_bijection
-        , testProperty "ByteString to Word160 is reversable"     word160_bytestring_bijection
+        , testProperty "ByteString to Integer is reversable"     integer_bytestring_bijection
         , testProperty "ByteString to CompactInfo is reversable" compactInfo_bytestring_bijection
         , testProperty "ByteString to NodeInfo is reversable"    nodeInfo_bytestring_bijection
         , testProperty "Compare parsing Word16 from octets"      word16_bytestring_conversion

@@ -1,16 +1,20 @@
 {-# LANGUAGE NamedFieldPuns #-}
+
 module Mainline.Mainline
     ( Model (..)
     , Msg (..)
+    , ServerState (..)
     , update
     , parseReceivedBytes
     , servePort
     , logParsingErr
+    , logHelper
+    , getMTstate
     ) where
 
 
 import Prelude hiding (init, log, filter)
-import Data.ByteString (ByteString)
+import Data.ByteString (ByteString, empty)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map             as Map
 import Data.Set                      (fromAscList, filter)
@@ -96,7 +100,7 @@ tokensize = 8
 
 data Model
     = Uninitialized
-    | Uninitialized1 ServerConfig
+    | Uninitialized1 ServerConfig ByteString
     | Ready ServerState
 
 data Msg
@@ -166,7 +170,7 @@ update (ErrorParsing ci bs err) model = (model, logParsingErr ci bs err)
 update (NewNodeId ix bs) Uninitialized = (initState, initialCmds)
     where
         initialCmds = Cmd.batch [ logmsg, pingSeed ]
-        initState = Uninitialized1 conf
+        initState = Uninitialized1 conf empty
 
         conf = ServerConfig
             { index = ix
@@ -199,8 +203,8 @@ update
         , body
         , newtid
         }
-    (Uninitialized1 conf) =
-        ( Uninitialized1 conf
+    (Uninitialized1 conf _) =
+        ( Uninitialized1 conf newtid
         , Cmd.batch [ logmsg, sendCmd ]
         )
 
@@ -270,7 +274,7 @@ update
         client
         (KPacket { message = Response nodeid Pong })
     )
-    (Uninitialized1 conf) = (model, warmup)
+    (Uninitialized1 conf _) = (model, warmup)
         where
             model = Ready ServerState
                 { transactions = Map.empty
@@ -343,10 +347,8 @@ update
         )
 
         where
-            mtState
-                = nodeid
-                >>= \nid -> Map.lookup nid transactions
-                >>= Map.lookup transactionId
+            mtState =
+                nodeid >>= \nid -> getMTstate nid transactions transactionId
 
             nodeid = case message of
                 (Query nid _) -> Just nid
@@ -410,7 +412,7 @@ update
 
 subscriptions :: Model -> Sub Msg
 subscriptions Uninitialized = Sub.none
-subscriptions (Uninitialized1 (ServerConfig { listenPort })) =
+subscriptions (Uninitialized1 (ServerConfig { listenPort }) _) =
     Sub.udp listenPort parseReceivedBytes
 subscriptions (Ready (ServerState { conf = ServerConfig { listenPort } })) =
     Sub.udp listenPort parseReceivedBytes
@@ -589,7 +591,7 @@ handleResponse
                 ]
 
 
-logHelper :: NodeInfo -> Message -> String -> ServerState -> (ServerState, Cmd Msg)
+logHelper :: NodeInfo -> Message -> String -> a -> (a, Cmd Msg)
 logHelper sender msg logstr state  = (state, log)
             where
                 log = Cmd.log Cmd.INFO
@@ -682,3 +684,7 @@ parseReceivedBytes compactinfo (Received { bytes, time }) =
     case decode bytes of
         Right kpacket -> Inbound time compactinfo kpacket
         Left msg -> ErrorParsing compactinfo bytes msg
+
+
+getMTstate :: NodeID -> Transactions -> ByteString -> Maybe TransactionState
+getMTstate nid trns tid = Map.lookup nid trns >>= Map.lookup tid
