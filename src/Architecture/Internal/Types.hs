@@ -32,6 +32,11 @@ data SubscriptionData msg
         , boundSocket :: Socket
         , udpHandler :: (CompactInfo -> Received -> msg)
         }
+    | TimerDat
+        { timeout :: Int
+        , timerHandler :: (POSIXTime -> msg)
+        , lastTime :: POSIXTime
+        }
 
 
 --type InternalState msg = Map Int (SubscriptionData msg)

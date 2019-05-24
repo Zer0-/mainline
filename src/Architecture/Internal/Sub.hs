@@ -33,7 +33,7 @@ import Network.Socket
 import Network.Socket.ByteString (recv, recvFrom)
 import Data.Hashable
 import qualified Data.ByteString as BS
-import Data.Time.Clock.POSIX (getPOSIXTime)
+import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 
 import Architecture.Internal.Types
     ( SubscriptionData (..)
@@ -52,10 +52,12 @@ maxline = 2048
 data TSub msg
     = TCP Port (BS.ByteString -> msg)
     | UDP Port (CompactInfo -> Received -> msg)
+    | Timer Int (POSIXTime -> msg) -- timeout in seconds
 
 instance Hashable (TSub msg) where
     hashWithSalt s (TCP p _) = s `hashWithSalt` (0 :: Int) `hashWithSalt` p
     hashWithSalt s (UDP p _) = s `hashWithSalt` (1 :: Int) `hashWithSalt` p
+    hashWithSalt s (Timer t _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` t
 
 
 newtype Sub msg = Sub [ TSub msg ]
@@ -79,6 +81,8 @@ updateSubscriptions substates (Sub tsubs) = do
         unsub (UDPDat { boundSocket }) = do
             close boundSocket
 
+        unsub (TimerDat _ _ _) = return ()
+
         sub :: TSub msg -> IO (SubscriptionData msg)
         sub (TCP p f) = do
             sock <- openTCPPort p
@@ -87,6 +91,8 @@ updateSubscriptions substates (Sub tsubs) = do
         sub (UDP p f) = do
             sock <- openUDPPort p
             return $ UDPDat p sock f
+
+        sub (Timer dt f) = getPOSIXTime >>= return . (TimerDat dt f)
 
         unloads = substates `Map.withoutKeys` (Set.fromList tsubkeys)
 
@@ -192,6 +198,14 @@ readSub (UDPDat { port, boundSocket, udpHandler }) = do
             (addrToCi sockaddr)
             (Received bs now)
         )
+
+readSub (TimerDat {timeout, timerHandler, lastTime}) = do
+    now <- getPOSIXTime
+    if (now - lastTime) < fromIntegral timeout
+    then
+        return (TimerDat timeout timerHandler lastTime, Nothing)
+    else
+        return (TimerDat timeout timerHandler now, Just $ timerHandler now)
 
 closem :: Maybe Socket -> IO ()
 closem = maybe (return ()) close
