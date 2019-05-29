@@ -335,6 +335,7 @@ fmt_decodeAnnoucePeerQuery
                                 (fromOctets nfo)
                                 (fromIntegral pval)
                                 (pack token)
+                                Nothing
                             )
                         )
                         Nothing

@@ -88,7 +88,7 @@ data QueryDat
     = Ping
     | FindNode NodeID
     | GetPeers InfoHash
-    | AnnouncePeer Bool InfoHash Port Token -- for fun, change Bool to Maybe Bool since it's an optional field
+    | AnnouncePeer Bool InfoHash Port Token (Maybe ByteString)-- for fun, change Bool to Maybe Bool since it's an optional field
     deriving Eq
 
 
@@ -120,11 +120,13 @@ instance Show QueryDat where
 
     show (GetPeers ifo) = "<GetPeers info_hash:" ++ show ifo ++ ">"
 
-    show (AnnouncePeer b ifo p token)
+    show (AnnouncePeer b ifo p token mname)
         = "<AnnouncePeer implied_port: " ++ show b
         ++ " infohash: " ++ show ifo
         ++ " port: " ++ show p
-        ++ " token: " ++ show token ++ ">"
+        ++ " token: " ++ show token
+        ++ maybe "" (((++) "name: ") . show) mname
+        ++ ">"
 
 instance Show ResponseDat where
     show (Pong) = "<Pong>"

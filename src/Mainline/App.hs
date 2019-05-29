@@ -29,7 +29,7 @@ import Mainline.RoutingTable (RoutingTable (..))
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 2
+nMplex = 100
 
 callPerSecondPerCi :: Int
 callPerSecondPerCi = 1
@@ -129,10 +129,10 @@ update
             | otherwise   = GT
 
         cf = case q of
-            FindNode       nid     -> af nid
-            GetPeers       ifo     -> af ifo
-            AnnouncePeer _ ifo _ _ -> af ifo
-            _                      -> bf
+            FindNode       nid       -> af nid
+            GetPeers       ifo       -> af ifo
+            AnnouncePeer _ ifo _ _ _ -> af ifo
+            _                        -> bf
 
         af aux i = min (nodeid `xor` i) (aux `xor` i)
         bf = xor nodeid

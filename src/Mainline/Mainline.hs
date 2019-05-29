@@ -67,7 +67,7 @@ import Network.KRPC.Types
  -  - Create procedure to add seed node to ServerState (routing table) ✓
  -  - Create procedure to potentially add unknown node ✓
  -  - Extend Sub[.udp] to provide current time ✓
- -  - Test socket recvFrom timeout, catch the event to have more consistent timer
+ -  - Test socket recvFrom timeout, catch the event to have more consistent timer ✓
  -  - Timer subscription for cleaning up (transactions, questionable nodes, etc)
  -
  - MILESTONE:
@@ -545,7 +545,7 @@ respond
     node
     tid
     _
-    (AnnouncePeer _ info _ _)
+    (AnnouncePeer _ info _ _ mname)
     state = (state, Cmd.batch [logmsg, sendCmd])
         where
             sendCmd =
@@ -562,6 +562,7 @@ respond
 
             logmsg = Cmd.log Cmd.INFO
                 [ "Got Peer announcement ", "info_hash:", show info
+                , maybe "" (((++) "name: ") . show) mname
                 , "replying with Pong to", show node
                 ]
 
@@ -641,11 +642,12 @@ logErr
 logErr _ _ state = (state, Cmd.none)
 
 onParsingErr :: Port -> CompactInfo -> ByteString -> String -> Cmd Msg
-onParsingErr p ci bs err = Cmd.batch [ logParsingErr ci bs err,  reply ]
+onParsingErr p ci bs err = Cmd.batch [ logParsingErr ci bs err,  logmsg, reply ]
     where
         reply = Cmd.sendUDP p ci (BL.toStrict $ encode kpacket)
         kpacket = KPacket empty (Error 203 (stringpack msg)) Nothing
         msg = "Could not parse received message: " ++ err
+        logmsg = Cmd.log Cmd.DEBUG [ "Sending", show kpacket , "to", show ci ]
 
 
 logParsingErr :: CompactInfo -> ByteString -> String -> Cmd Msg

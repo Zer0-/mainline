@@ -100,7 +100,7 @@ queryToBDictMap :: QueryDat -> BDictMap BValue
 queryToBDictMap (Ping) = Nil
 queryToBDictMap (FindNode i) = singleton (stringpack "target") (bEncode i)
 queryToBDictMap (GetPeers i) = singleton (stringpack "info_hash") (bEncode i)
-queryToBDictMap (AnnouncePeer implied_port infohash portnum token) =
+queryToBDictMap (AnnouncePeer implied_port infohash portnum token _) =
     singleton
         (stringpack "implied_port")
         (toBEncode $ fromEnum implied_port)                `union`
@@ -130,10 +130,10 @@ concatNodes = BS.concat . map octToByteString
 
 
 queryName :: QueryDat -> String
-queryName  Ping                  = "ping"
-queryName (FindNode _          ) = "find_node"
-queryName (GetPeers _          ) = "get_peers"
-queryName (AnnouncePeer _ _ _ _) = "announce_peer"
+queryName  Ping                    = "ping"
+queryName (FindNode _          )   = "find_node"
+queryName (GetPeers _          )   = "get_peers"
+queryName (AnnouncePeer _ _ _ _ _) = "announce_peer"
 
 
 
@@ -156,7 +156,15 @@ data BVal
     | BInt Integer
     | Li
     | Le
-    deriving (Eq, Show)
+    deriving (Eq)
+
+instance Show BVal where
+    show Ds = "dictionary start"
+    show De = "dictionary end"
+    show (Bs bs) = "bytestring " ++ show bs
+    show (BInt i) = "integer " ++ show i
+    show Li = "list start"
+    show Le = "list end"
 
 
 kparser :: Parser KPacket
@@ -245,15 +253,28 @@ qparser = do
 
 qdatparser :: Parser QueryDat
 qdatparser
-    =   (FindNode <$> findNode)
+    =   findNode
     <|> (try announcePeer)
-    <|> (GetPeers <$> getPeers)
+    <|> getPeers
     <|> return Ping
 
     where
-        findNode = isBs (stringpack "target") >> try parseNodeid
+        findNode = do
+            isBs (stringpack "target")
+            nodeid <- try parseNodeid
+            parseWant
+            return $ FindNode nodeid
 
-        getPeers = isBs (stringpack "info_hash") >> try parseNodeid
+        getPeers = do
+            isBs (stringpack "info_hash")
+            nodeid <- try parseNodeid
+
+            --noseed/scrape is for bep_0033 (not yet implemented)
+            optional (isBs (stringpack "noseed") >> parseInt)
+            optional (isBs (stringpack "scrape") >> parseInt)
+            parseWant
+
+            return $ GetPeers nodeid
 
         announcePeer = do
             flag <- option False impliedPort
@@ -261,13 +282,17 @@ qdatparser
             isBs (stringpack "info_hash")
             info_hash <- parseNodeid
 
+            mname <- option Nothing (isBs (stringpack "name") >> (Just <$> parseBs))
+
             isBs (stringpack "port")
             port <- (fromIntegral <$> parseInt)
+
+            optional (isBs (stringpack "seed") >> parseInt)
 
             isBs (stringpack "token")
             token <- parseBs
 
-            return $ AnnouncePeer flag info_hash port token
+            return $ AnnouncePeer flag info_hash port token mname
 
         impliedPort
             = (/=) 0 <$> (isBs (stringpack "implied_port") >> parseInt)
@@ -289,6 +314,11 @@ parseBs = satisfy test
 
 parseNodeid :: Parser NodeID
 parseNodeid = fromByteString <$> parseBs
+
+
+-- This is for IPv6 support and is currently unimplemented
+parseWant :: Parser ()
+parseWant = optional (isBs (stringpack "want") >> (withList $ many parseBs))
 
 
 withList :: Parser a -> Parser a
