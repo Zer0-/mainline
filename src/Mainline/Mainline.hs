@@ -8,7 +8,7 @@ module Mainline.Mainline
     , update
     , parseReceivedBytes
     , servePort
-    , logParsingErr
+    , onParsingErr
     , logHelper
     , logErr
     , getMTstate
@@ -31,6 +31,7 @@ import qualified Architecture.Cmd as Cmd
 --import Architecture.Sub              (Sub, Received (..))
 import Architecture.Sub              (Received (..))
 import Network.KRPC                  (KPacket (..), scanner)
+import Network.KRPC.Helpers          (stringpack)
 import Network.Octets                (Octets (..), fromByteString)
 import Mainline.RoutingTable
     ( initRoutingTable
@@ -130,6 +131,7 @@ data Msg
         , body          :: Message
         , tid           :: ByteString
         }
+    | ProcessQueue POSIXTime
 
 data ServerState = ServerState
     { transactions :: Transactions
@@ -169,7 +171,11 @@ init = (Uninitialized, Cmd.randomBytes 20 (NewNodeId 0))
 
 update :: Msg -> Model -> (Model, Cmd Msg)
 -- Error Parsing
-update (ErrorParsing ci bs err) model = (model, logParsingErr ci bs err)
+update (ErrorParsing ci bs err) m =
+    case m of
+        Uninitialized -> (m, logParsingErr ci bs err)
+        (Uninitialized1 c _) -> (m, onParsingErr (listenPort c) ci bs err)
+        Ready state -> (m, onParsingErr (listenPort $ conf state) ci bs err)
 
 -- Get new node id. Init server state, request tid for pinging seed node
 update (NewNodeId ix bs) Uninitialized = (initState, initialCmds)
@@ -426,6 +432,7 @@ update (SendMessage {}) Uninitialized = undefined
 update (SendMessage {}) (Uninitialized1 _ _) = undefined
 update (SendResponse {}) Uninitialized = undefined
 update (SendResponse {}) (Uninitialized1 _ _) = undefined
+update (ProcessQueue _) _ = undefined
 
 {-
 subscriptions :: Model -> Sub Msg
@@ -633,6 +640,14 @@ logErr
 
 logErr _ _ state = (state, Cmd.none)
 
+onParsingErr :: Port -> CompactInfo -> ByteString -> String -> Cmd Msg
+onParsingErr p ci bs err = Cmd.batch [ logParsingErr ci bs err,  reply ]
+    where
+        reply = Cmd.sendUDP p ci (BL.toStrict $ encode kpacket)
+        kpacket = KPacket empty (Error 203 (stringpack msg)) Nothing
+        msg = "Could not parse received message: " ++ err
+
+
 logParsingErr :: CompactInfo -> ByteString -> String -> Cmd Msg
 logParsingErr ci bs err =
     Cmd.log Cmd.INFO $
@@ -648,6 +663,7 @@ logParsingErr ci bs err =
             (\_ -> [])
             (\bval -> ["scanner:", show $ scanner bval])
             (decode bs)
+
 
 
 filterNodes ::  NodeInfo -> Bool

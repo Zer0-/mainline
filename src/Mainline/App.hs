@@ -1,14 +1,15 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
-import Prelude hiding (init)
+import Prelude hiding (init, lookup)
 import Data.Maybe (isJust)
 import qualified Data.Map as Map
 import Data.Array (Array, listArray, indices, (!), (//), assocs)
-import Data.List (sortBy)
+import Data.List (sortBy, foldl')
 import Data.Bits (xor)
 import Data.Function (on)
-import Data.Cache.LRU (LRU, newLRU)
+import Data.Cache.LRU (LRU, newLRU, lookup, insert)
 import Data.Time.Clock.POSIX (POSIXTime)
+import Data.Hashable (hashWithSalt, hash)
 
 import Architecture.Cmd (Cmd)
 import qualified Architecture.Cmd as Cmd
@@ -18,17 +19,25 @@ import qualified Architecture.Sub as Sub
 import qualified Mainline.Mainline as M
 import Mainline.Mainline (Msg (..))
 import Network.KRPC (KPacket (..))
-import Network.KRPC.Types (Message (..), NodeInfo (..), QueryDat (..))
+import Network.KRPC.Types
+    ( Message     (..)
+    , NodeInfo    (..)
+    , QueryDat    (..)
+    , CompactInfo (..)
+    )
 import Mainline.RoutingTable (RoutingTable (..))
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 100
+nMplex = 2
+
+callPerSecondPerCi :: Int
+callPerSecondPerCi = 1
 
 data Model = Model
     { models :: Array Int M.Model
     , tcache :: LRU Int POSIXTime
-    , queue :: [M.Msg]
+    , queue :: [(Int, Int, M.Msg)]
     }
 
 main :: IO ()
@@ -51,7 +60,11 @@ subscriptions :: Model -> Sub M.Msg
 subscriptions mm
     | indices m == [] = Sub.none
     | isUn (m!0) = Sub.none
-    | otherwise = Sub.udp M.servePort M.parseReceivedBytes
+    | otherwise = Sub.batch
+        [ Sub.udp M.servePort M.parseReceivedBytes
+        , Sub.timer 1 M.ProcessQueue
+        ]
+
         where
             m = models mm
             isUn (M.Uninitialized) = True
@@ -59,7 +72,7 @@ subscriptions mm
 
 update :: M.Msg -> Model -> (Model, Cmd M.Msg)
 update (M.NewNodeId ix bs) m = updateExplicit (M.NewNodeId ix bs) m ix
-update (M.ErrorParsing ci bs err) m = (m, M.logParsingErr ci bs err)
+update (M.ErrorParsing ci bs err) m = (m, M.onParsingErr M.servePort ci bs err)
 update
     ( M.Inbound t ci
         ( KPacket
@@ -126,7 +139,7 @@ update
 
         getid (M.Ready state) = M.ourId $ M.conf state
         getid (M.Uninitialized1 conf _) = M.ourId conf
-        getid (M.Uninitialized) = -(((^) :: Integer -> Integer -> Integer) 2 161)
+        getid (M.Uninitialized) = -(2`e`161)
 
         ms = assocs (models mm)
 
@@ -136,13 +149,43 @@ update
 update ( M.Inbound _ ci ( KPacket { message })) m = M.logErr ci message m
 
 update (SendFirstMessage {idx, sendRecipient, body, newtid}) m =
-    updateExplicit (SendFirstMessage idx sendRecipient body newtid) m idx
+    sendOrQueue
+        (throttle (tcache m) h (fromInteger 0) callPerSecondPerCi)
+        h
+        msg
+        idx
+        m
+
+    where
+        h = hashci sendRecipient
+        msg = SendFirstMessage idx sendRecipient body newtid
 
 update (SendMessage {idx, sendAction, targetNode, body, newtid, when}) m =
-    updateExplicit (SendMessage idx sendAction targetNode body newtid when) m idx
+    sendOrQueue
+        (throttle (tcache m) h when callPerSecondPerCi)
+        h
+        msg
+        idx
+        m
+
+    where
+        h = hashci $ compactInfo targetNode
+        msg = SendMessage idx sendAction targetNode body newtid when
 
 update (SendResponse {idx, targetNode, body, tid}) m =
     updateExplicit (SendResponse idx targetNode body tid) m idx
+
+update (ProcessQueue now) m = foldl' f (m { queue = [] }, Cmd.none) (queue m)
+    where
+        f (model, cmds) (i, key, msg) =
+            let
+                (model2, cmds2) = sendOrQueue
+                    (throttle (tcache model) key now callPerSecondPerCi)
+                    key
+                    msg
+                    i
+                    model
+            in (model2, Cmd.batch [cmds, cmds2])
 
 
 updateExplicit :: M.Msg -> Model -> Int -> (Model, Cmd M.Msg)
@@ -150,3 +193,44 @@ updateExplicit msg model ix = (model { models = m // [(ix, mm)] }, cmds)
     where
         m = models model
         (mm, cmds) = M.update msg (m!ix)
+
+
+sendOrQueue
+    :: Either (LRU Int POSIXTime) (LRU Int POSIXTime)
+    -> Int
+    -> M.Msg
+    -> Int
+    -> Model
+    -> (Model, Cmd M.Msg)
+sendOrQueue result key msg idx m =
+    case result of
+        (Left cache) ->
+            ( m { tcache = cache, queue = (idx, key, msg) : (queue m) }
+            , Cmd.none
+            )
+
+        (Right cache) -> updateExplicit msg m { tcache = cache } idx
+
+
+throttle
+    :: (Ord a)
+    => LRU a POSIXTime
+    -> a
+    -> POSIXTime
+    -> Int -- Maximum calls per second
+    -> Either (LRU a POSIXTime) (LRU a POSIXTime)
+throttle cache key now cps =
+    case lookup key cache of
+        (_, Nothing) -> Right cache2
+        (_, Just time) ->
+            if now - time < (fromInteger 1) / (fromIntegral cps)
+            then Left cache2
+            else Right cache2
+    where
+        cache2 = insert key now cache
+
+hashci :: CompactInfo -> Int
+hashci (CompactInfo ip port) = hashWithSalt (hash ip) port
+
+e :: Integer -> Integer -> Integer
+e = (^)
