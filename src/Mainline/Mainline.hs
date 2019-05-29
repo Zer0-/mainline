@@ -412,6 +412,18 @@ update
                     logErr client e state1
 
 
+-- Explicitly list undefined states
+update (NewNodeId _ _) (Uninitialized1 _ _) = undefined
+update (NewNodeId _ _) (Ready _) = undefined
+update (Inbound _ _ _) Uninitialized = undefined
+update (Inbound _ _ _) (Uninitialized1 _ _) = undefined
+update (SendFirstMessage {}) Uninitialized = undefined
+update (SendFirstMessage {}) (Ready _) = undefined
+update (SendMessage {}) Uninitialized = undefined
+update (SendMessage {}) (Uninitialized1 _ _) = undefined
+update (SendResponse {}) Uninitialized = undefined
+update (SendResponse {}) (Uninitialized1 _ _) = undefined
+
 subscriptions :: Model -> Sub Msg
 subscriptions Uninitialized = Sub.none
 subscriptions (Uninitialized1 (ServerConfig { listenPort }) _) =

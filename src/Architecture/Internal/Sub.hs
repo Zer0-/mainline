@@ -31,6 +31,7 @@ import Network.Socket
     , hostAddressToTuple
     )
 import Network.Socket.ByteString (recv, recvFrom)
+import System.Timeout (timeout)
 import Data.Hashable
 import qualified Data.ByteString as BS
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
@@ -48,6 +49,10 @@ import Network.Octets (fromOctets)
 maxline :: Int
 maxline = 2048
 
+--In μs
+udpTimeout :: Int
+udpTimeout = 10 * 10^6
+
 
 data TSub msg
     = TCP Port (BS.ByteString -> msg)
@@ -58,6 +63,11 @@ instance Hashable (TSub msg) where
     hashWithSalt s (TCP p _) = s `hashWithSalt` (0 :: Int) `hashWithSalt` p
     hashWithSalt s (UDP p _) = s `hashWithSalt` (1 :: Int) `hashWithSalt` p
     hashWithSalt s (Timer t _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` t
+
+instance Show (TSub msg) where
+    show (TCP p _) = "TSUB_TCP:" ++ show p
+    show (UDP p _) = "TSUB_UDP:" ++ show p
+    show (Timer t _) = "TSUB_TIMER:" ++ show t
 
 
 newtype Sub msg = Sub [ TSub msg ]
@@ -97,13 +107,13 @@ updateSubscriptions substates (Sub tsubs) = do
         unloads = substates `Map.withoutKeys` (Set.fromList tsubkeys)
 
         foldSubs :: SubState msg -> (Int, TSub msg) -> IO (SubState msg)
-        foldSubs s (k, t) =
+        foldSubs s (k, t) = do
             sub t >>= (\s_ -> (return $ Map.insert k s_ s))
 
         loads =
             filter (\(k, _) -> Map.notMember k substates) tsubpairs
 
-        tsubpairs = [(k, t) | k <- tsubkeys, t <- tsubs]
+        tsubpairs = zip tsubkeys tsubs
 
         tsubkeys = map hash tsubs
 
@@ -123,6 +133,11 @@ updateHandlers s tsubs = foldl something Map.empty tsubs
             (UDP _ f)
             (UDPDat {port, boundSocket}) =
                 UDPDat {port, boundSocket, udpHandler=f}
+
+        updateHandler
+            (Timer _ f)
+            (TimerDat {seconds, lastTime}) =
+                TimerDat seconds f lastTime
 
         updateHandler _  _ = undefined
 
@@ -185,27 +200,30 @@ readSub (TCPDat p lsnsc cnsc f) =
                 0 ->  return bss
                 _ -> recvAll (bss `BS.append` bs) sock
 
-readSub (UDPDat { port, boundSocket, udpHandler }) = do
-    (bs, sockaddr) <- recvFrom boundSocket maxline
-    now <- getPOSIXTime
+readSub (UDPDat { port, boundSocket, udpHandler }) =
+    (timeout udpTimeout (recvFrom boundSocket maxline))
+    >>= maybe (return (subdata, Nothing)) handle
 
-    return
-        ( UDPDat
-            port
-            boundSocket
-            udpHandler
-        , Just $ udpHandler
-            (addrToCi sockaddr)
-            (Received bs now)
-        )
+    where
+        subdata = UDPDat port boundSocket udpHandler
 
-readSub (TimerDat {timeout, timerHandler, lastTime}) = do
+        handle (bs, sockaddr) = do
+            now <- getPOSIXTime
+
+            return
+                ( subdata
+                , Just $ udpHandler
+                    (addrToCi sockaddr)
+                    (Received bs now)
+                )
+
+readSub (TimerDat {seconds, timerHandler, lastTime}) = do
     now <- getPOSIXTime
-    if (now - lastTime) < fromIntegral timeout
+    if (now - lastTime) < fromIntegral seconds
     then
-        return (TimerDat timeout timerHandler lastTime, Nothing)
+        return (TimerDat seconds timerHandler lastTime, Nothing)
     else
-        return (TimerDat timeout timerHandler now, Just $ timerHandler now)
+        return (TimerDat seconds timerHandler now, Just $ timerHandler now)
 
 closem :: Maybe Socket -> IO ()
 closem = maybe (return ()) close

@@ -33,7 +33,7 @@ data SubscriptionData msg
         , udpHandler :: (CompactInfo -> Received -> msg)
         }
     | TimerDat
-        { timeout :: Int
+        { seconds :: Int
         , timerHandler :: (POSIXTime -> msg)
         , lastTime :: POSIXTime
         }

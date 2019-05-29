@@ -4,6 +4,7 @@ module Architecture.Sub
     , udp
     , timer
     , none
+    , batch
     , Received (..)
     ) where
 
@@ -29,3 +30,6 @@ timer dt h = Sub [ Timer dt h ]
 
 none :: Sub msg
 none = Sub []
+
+batch :: [ Sub msg ] -> Sub msg
+batch subs = Sub $ subs >>= (\(Sub tsubs) -> tsubs)
