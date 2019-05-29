@@ -7,6 +7,8 @@ import Data.Array (Array, listArray, indices, (!), (//), assocs)
 import Data.List (sortBy)
 import Data.Bits (xor)
 import Data.Function (on)
+import Data.Cache.LRU (LRU, newLRU)
+import Data.Time.Clock.POSIX (POSIXTime)
 
 import Architecture.Cmd (Cmd)
 import qualified Architecture.Cmd as Cmd
@@ -21,9 +23,13 @@ import Mainline.RoutingTable (RoutingTable (..))
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 2
+nMplex = 100
 
-type Model = Array Int M.Model
+data Model = Model
+    { models :: Array Int M.Model
+    , tcache :: LRU Int POSIXTime
+    , queue :: [M.Msg]
+    }
 
 main :: IO ()
 main = run config
@@ -33,16 +39,21 @@ config = Config init update subscriptions
 
 init :: (Model, Cmd M.Msg)
 init =
-    ( listArray (0, nMplex - 1) (replicate nMplex M.Uninitialized)
+    ( Model
+        { models = listArray (0, nMplex - 1) (replicate nMplex M.Uninitialized)
+        , tcache = newLRU (Just $ fromIntegral $ nMplex * 10)
+        , queue = []
+        }
     , Cmd.batch [(Cmd.randomBytes 20 (M.NewNodeId i)) | i <- [0..nMplex-1]]
     )
 
 subscriptions :: Model -> Sub M.Msg
-subscriptions m
+subscriptions mm
     | indices m == [] = Sub.none
     | isUn (m!0) = Sub.none
     | otherwise = Sub.udp M.servePort M.parseReceivedBytes
         where
+            m = models mm
             isUn (M.Uninitialized) = True
             isUn _ = False
 
@@ -58,14 +69,15 @@ update
             }
         )
     )
-    m
+    mm
     | null havet = M.logHelper
         (NodeInfo nodeid ci)
         (Response nodeid r)
         "Ignoring a response that wasn't in our transaction state from"
-        m
-    | otherwise = updateExplicit msg m (fst $ head havet)
+        mm
+    | otherwise = updateExplicit msg mm (fst $ head havet)
         where
+            m = models mm
             msg = M.Inbound t ci (KPacket transactionId (Response nodeid r) v)
 
             havet = filter (fil . snd) (assocs m)
@@ -87,7 +99,7 @@ update
             }
         )
     )
-    m = updateExplicit msg m (fst $ head sorted)
+    mm = updateExplicit msg mm (fst $ head sorted)
     where
         msg = M.Inbound t ci (KPacket transactionId (Query nodeid q) v)
 
@@ -114,9 +126,9 @@ update
 
         getid (M.Ready state) = M.ourId $ M.conf state
         getid (M.Uninitialized1 conf _) = M.ourId conf
-        getid (M.Uninitialized) = -(2^161)
+        getid (M.Uninitialized) = -(((^) :: Integer -> Integer -> Integer) 2 161)
 
-        ms = assocs m
+        ms = assocs (models mm)
 
         fil (M.Ready state) = Map.member nodeid (nodes $ M.routingTable state)
         fil _ = False
@@ -134,6 +146,7 @@ update (SendResponse {idx, targetNode, body, tid}) m =
 
 
 updateExplicit :: M.Msg -> Model -> Int -> (Model, Cmd M.Msg)
-updateExplicit msg m ix = (m // [(ix, mm)], cmds)
+updateExplicit msg model ix = (model { models = m // [(ix, mm)] }, cmds)
     where
+        m = models model
         (mm, cmds) = M.update msg (m!ix)

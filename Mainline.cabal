@@ -92,7 +92,8 @@ executable Mainline
                    text,
                    time,
                    hashable,
-                   array
+                   array,
+                   lrucache
   other-modules:
                    Architecture.Cmd
                    Architecture.Internal.Cmd

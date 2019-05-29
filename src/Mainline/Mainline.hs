@@ -24,11 +24,12 @@ import Data.Word                     (Word32)
 import Data.BEncode                  (encode, decode)
 import Data.Time.Clock.POSIX         (POSIXTime)
 
-import Architecture.TEA              (Config (..), run)
+--import Architecture.TEA              (Config (..), run)
 import Architecture.Cmd              (Cmd)
 import qualified Architecture.Cmd as Cmd
-import qualified Architecture.Sub as Sub
-import Architecture.Sub              (Sub, Received (..))
+--import qualified Architecture.Sub as Sub
+--import Architecture.Sub              (Sub, Received (..))
+import Architecture.Sub              (Received (..))
 import Network.KRPC                  (KPacket (..), scanner)
 import Network.Octets                (Octets (..), fromByteString)
 import Mainline.RoutingTable
@@ -154,6 +155,7 @@ type Transactions = Map.Map NodeID (Map.Map ByteString TransactionState)
 data Action = Warmup deriving Eq
 
 
+{-
 main :: IO ()
 main = run config
 
@@ -162,6 +164,7 @@ config = Config init update subscriptions
 
 init :: (Model, Cmd Msg)
 init = (Uninitialized, Cmd.randomBytes 20 (NewNodeId 0))
+-}
 
 
 update :: Msg -> Model -> (Model, Cmd Msg)
@@ -424,13 +427,14 @@ update (SendMessage {}) (Uninitialized1 _ _) = undefined
 update (SendResponse {}) Uninitialized = undefined
 update (SendResponse {}) (Uninitialized1 _ _) = undefined
 
+{-
 subscriptions :: Model -> Sub Msg
 subscriptions Uninitialized = Sub.none
 subscriptions (Uninitialized1 (ServerConfig { listenPort }) _) =
     Sub.udp listenPort parseReceivedBytes
 subscriptions (Ready (ServerState { conf = ServerConfig { listenPort } })) =
     Sub.udp listenPort parseReceivedBytes
-
+-}
 
 respond
     :: NodeInfo

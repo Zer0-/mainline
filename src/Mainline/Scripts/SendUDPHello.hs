@@ -11,7 +11,8 @@ servePort :: Port
 servePort = 51412
 
 seedNodePort :: Port
-seedNodePort = 51412
+seedNodePort = 51416
+--seedNodePort = 51412
 
 seedNodeHost :: Word32
 seedNodeHost = fromOctets [ 127, 0, 0, 1 ]

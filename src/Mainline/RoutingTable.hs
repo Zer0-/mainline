@@ -93,7 +93,7 @@ exists rt nodeinfo = Map.member (nodeId nodeinfo) (nodes rt)
 initRoutingTable :: NodeID -> RoutingTable
 initRoutingTable nodeid = RoutingTable bucket Map.empty
     where
-        bucket = Bucket nodeid bucketsize 0 (2^160) Set.empty
+        bucket = Bucket nodeid bucketsize 0 (((^) :: Integer -> Integer -> Integer) 2 160) Set.empty
 
 
 getOwnId :: RoutingTable -> NodeID

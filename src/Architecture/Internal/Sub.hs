@@ -51,7 +51,7 @@ maxline = 2048
 
 --In μs
 udpTimeout :: Int
-udpTimeout = 10 * 10^6
+udpTimeout = 10 * (((^) :: Int -> Int -> Int) 10 6)
 
 
 data TSub msg
