@@ -37,7 +37,7 @@ callPerSecondPerCi = 1
 data Model = Model
     { models :: Array Int M.Model
     , tcache :: LRU Int POSIXTime
-    , queue :: [(Int, Int, M.Msg)]
+    , queue :: [(Int, Int, M.Msg)] -- WARN: unbounded
     }
 
 main :: IO ()

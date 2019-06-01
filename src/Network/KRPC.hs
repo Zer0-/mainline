@@ -156,15 +156,7 @@ data BVal
     | BInt Integer
     | Li
     | Le
-    deriving (Eq)
-
-instance Show BVal where
-    show Ds = "dictionary start"
-    show De = "dictionary end"
-    show (Bs bs) = "bytestring " ++ show bs
-    show (BInt i) = "integer " ++ show i
-    show Li = "list start"
-    show Le = "list end"
+    deriving (Eq, Show)
 
 
 kparser :: Parser KPacket

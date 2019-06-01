@@ -25,6 +25,11 @@ import Architecture.Internal.Cmd
     , Cmd (..)
     )
 
+-- TODO: use a config
+minLoglvl :: Int
+minLoglvl = fromEnum INFO
+
+
 getRandom :: (Float -> msg) -> Cmd msg
 getRandom f = Cmd [ CmdGetRandom f ]
 
@@ -43,13 +48,14 @@ sendUDP p dest bs = Cmd [ CmdSendUDP p dest bs ]
 getTime :: (POSIXTime -> msg) -> Cmd msg
 getTime f = Cmd [ CmdGetTime f ]
 
-data Loglevel = WARNING | INFO | DEBUG deriving Show
+data Loglevel = WARNING | INFO | DEBUG deriving (Enum, Show)
 
 log :: Loglevel -> [ String ] -> Cmd msg
-log lvl xs = Cmd [CmdLog s]
+log lvl xs
+    | fromEnum lvl <= minLoglvl = Cmd [CmdLog s]
+    | otherwise = none
     where
-        s
-            = show lvl ++ " - "
+        s = show lvl ++ " - "
             ++ (intercalate " " xs)
             ++ "\n"
 
