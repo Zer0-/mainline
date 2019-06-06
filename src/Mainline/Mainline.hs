@@ -391,19 +391,13 @@ update
                 }
 
             (newState, cmd) = case message of
-                (Query nid qdat) -> case mtState of
-                    Nothing ->
-                        respond
-                            (NodeInfo nid client)
-                            transactionId
-                            now
-                            qdat
-                            state1
-                    (Just _) -> logHelper
+                (Query nid qdat) ->
+                    respond
                         (NodeInfo nid client)
-                        (Query nid qdat)
-                        "Ignoring a received Query instead of a response from"
-                        (mkstate2 nid)
+                        transactionId
+                        now
+                        qdat
+                        state1
                 (Response nid rdat) -> case mtState of
                     (Just tranState) ->
                         handleResponse
@@ -420,12 +414,21 @@ update
                 e ->
                     logErr client e state1
 
+update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
+    ((Uninitialized1 conf tid), log)
+
+    where
+        log = Cmd.log Cmd.INFO
+            [ "Ignoring received message while Uninitialized1"
+            , show ci
+            , show kpacket
+            ]
+
 
 -- Explicitly list undefined states
 update (NewNodeId _ _) (Uninitialized1 _ _) = undefined
 update (NewNodeId _ _) (Ready _) = undefined
 update (Inbound _ _ _) Uninitialized = undefined
-update (Inbound _ _ _) (Uninitialized1 _ _) = undefined
 update (SendFirstMessage {}) Uninitialized = undefined
 update (SendFirstMessage {}) (Ready _) = undefined
 update (SendMessage {}) Uninitialized = undefined

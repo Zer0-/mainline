@@ -15,6 +15,7 @@ import Network.Socket (SockAddr (..), tupleToHostAddress)
 import Network.Socket.ByteString (sendTo)
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import System.IO (hFlush, stdout)
+import Control.Exception.Safe (tryIO)
 
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
 import Network.Octets (octets)
@@ -41,45 +42,55 @@ newtype Cmd msg = Cmd [ TCmd msg ]
 
 
 execTCmd :: InternalState msg -> TCmd msg -> IO (InternalState msg, Maybe msg)
-execTCmd states (CmdGetRandom f) =
-    randomIO >>= \i -> return (states, Just $ f i)
+execTCmd state (CmdGetRandom f) =
+    randomIO >>= \i -> return (state, Just $ f i)
 
-execTCmd states (CmdGetTime f) =
-    getPOSIXTime >>= \t -> return (states, Just $ f t)
+execTCmd state (CmdGetTime f) =
+    getPOSIXTime >>= \t -> return (state, Just $ f t)
 
-execTCmd states (CmdLog msg) = putStr msg >> hFlush stdout >> return (states, Nothing)
+execTCmd state (CmdLog msg) = putStr msg >> hFlush stdout >> return (state, Nothing)
 
-execTCmd states (CmdRandomBytes n f) =
+execTCmd state (CmdRandomBytes n f) =
     do
         g <- newGenIO :: IO CtrDRBG
 
         case genBytes n g of
             Left err -> error $ show err
-            Right (result, _) -> return (states, Just (f result))
+            Right (result, _) -> return (state, Just (f result))
 
 
-execTCmd states (CmdReadFile filename f) =
+execTCmd state (CmdReadFile filename f) =
     do
         bytes <- BS.readFile filename
-        return (states, Just $ f bytes)
+        return (state, Just $ f bytes)
 
 
-execTCmd states (CmdWriteFile filename bs) =
+execTCmd state (CmdWriteFile filename bs) =
     do
         BS.writeFile filename bs
-        return (states, Nothing)
+        return (state, Nothing)
 
 
-execTCmd states (CmdSendUDP srcPort dest bs) =
+execTCmd state (CmdSendUDP srcPort dest bs) =
     do
         (newSubStates, sock) <- getSock
 
-        _ <- sendTo sock bs sockaddr --returns bytes sent.
-        --TODO: something intelligent with this
+        --sendTo has failed before with:
+        --Mainline: Network.Socket.sendBufTo: invalid argument (Invalid argument)
+        sendResult <- tryIO $ sendTo sock bs sockaddr
 
-        return (states { subState = newSubStates }, Nothing)
+        either onSendErr (onSendOk newSubStates) sendResult
 
         where
+            onSendOk newSubStates _ =
+                return (state { subState = newSubStates }, Nothing)
+
+            onSendErr e = execTCmd state (CmdLog (errmsg e))
+
+            errmsg e
+                = "Error occurred while sending to "
+                ++  show dest ++ " -- " ++ show e ++ "\n"
+
             sockaddr = ciToAddr dest
 
             ciToAddr :: CompactInfo -> SockAddr
@@ -105,20 +116,20 @@ execTCmd states (CmdSendUDP srcPort dest bs) =
                     (return . ((,) substates) . boundSocket)
                     (Map.lookup key substates)
 
-            substates = subState states
+            substates = subState state
 
             key = hash (UDP srcPort undefined)
 
 
 execCmd :: InternalState msg -> Cmd msg -> IO (InternalState msg , [ msg ])
-execCmd states (Cmd l) = foldM ff (states, []) l
+execCmd state (Cmd l) = foldM ff (state, []) l
 
     where
         ff :: (InternalState msg, [ msg ]) -> TCmd msg -> IO (InternalState msg, [ msg ])
-        ff (states2, msgs) tcmd =
-            (execTCmd states2 tcmd)
+        ff (state2, msgs) tcmd =
+            (execTCmd state2 tcmd)
                 >>=
-                    \ (states3, mmsg) ->
-                        return (states3, maybe msgs (: msgs) mmsg)
+                    \ (state3, mmsg) ->
+                        return (state3, maybe msgs (: msgs) mmsg)
 
 -- execCmd (Cmd l) = (mapM execTCmd l) >>= (return . catMaybes)

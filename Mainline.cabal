@@ -44,6 +44,7 @@ library
                    random,
                    text,
                    time,
+                   safe-exceptions,
                    hashable
   hs-source-dirs:      src
   default-language:    Haskell2010
@@ -93,6 +94,7 @@ executable Mainline
                    time,
                    hashable,
                    array,
+                   safe-exceptions,
                    lrucache
   other-modules:
                    Architecture.Cmd
@@ -110,7 +112,7 @@ executable Mainline
                    Network.KRPC.Types
                    Network.Octets
   hs-source-dirs:  src
-  ghc-options:     -Wall -rtsopts
+  ghc-options:     -Wall -rtsopts -O2
   default-language: Haskell2010
   main-is:         Mainline/App.hs
 
@@ -128,6 +130,7 @@ executable SendUDPHello
                    hashable,
                    time,
                    random,
+                   safe-exceptions,
                    bytestring
   other-modules:
                    Architecture.Cmd
@@ -158,6 +161,7 @@ executable Teatime
                    network,
                    bytestring,
                    random,
+                   safe-exceptions,
                    hashable
   other-modules:
                    Architecture.Cmd
