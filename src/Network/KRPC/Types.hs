@@ -11,6 +11,7 @@ module Network.KRPC.Types
     ) where
 
 import Data.Word        (Word16, Word32)
+import Data.Hashable    (Hashable (..))
 import Data.List        (intercalate)
 import Data.ByteString  (ByteString)
 import Data.BEncode     (BEncode (..), BValue)
@@ -45,6 +46,9 @@ instance Show CompactInfo where
         "<" ++ ipstr ++ ":" ++ show p ++ ">"
         where
             ipstr = intercalate "." $ map show (octets i)
+
+instance Hashable CompactInfo where
+  hashWithSalt s (CompactInfo i p) = s `hashWithSalt` i `hashWithSalt` p
 
 
 instance BEncode CompactInfo where

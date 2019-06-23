@@ -1,6 +1,7 @@
 module Architecture.Sub
     ( Sub
     , tcp
+    , readTCP
     , udp
     , timer
     , none
@@ -21,6 +22,9 @@ import Architecture.Internal.Sub
 
 tcp :: Port -> (ByteString -> msg) -> Sub msg
 tcp port h = Sub [ TCP port h ]
+
+readTCP :: CompactInfo -> (ByteString -> Int) -> (Received -> msg) -> Sub msg
+readTCP ci g h = Sub [ TCPClient ci g h ]
 
 udp :: Port -> (CompactInfo -> Received -> msg) -> Sub msg
 udp port h = Sub [ UDP port h ]

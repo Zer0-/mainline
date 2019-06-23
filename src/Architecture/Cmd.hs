@@ -8,6 +8,7 @@ module Architecture.Cmd
     , log
     , print
     , sendUDP
+    , sendTCP
     , getTime
     , readFile
     , writeFile
@@ -44,6 +45,9 @@ batch cmds = Cmd $ concat [t | (Cmd t) <- cmds]
 
 sendUDP :: Port -> CompactInfo -> ByteString -> Cmd msg
 sendUDP p dest bs = Cmd [ CmdSendUDP p dest bs ]
+
+sendTCP :: CompactInfo -> ByteString -> Cmd msg
+sendTCP ci bs = Cmd [ CmdSendTCP ci bs ]
 
 getTime :: (POSIXTime -> msg) -> Cmd msg
 getTime f = Cmd [ CmdGetTime f ]

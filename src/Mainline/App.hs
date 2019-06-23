@@ -29,10 +29,10 @@ import Mainline.RoutingTable (RoutingTable (..))
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 100
+nMplex = 2000
 
 callPerSecondPerCi :: Int
-callPerSecondPerCi = 1
+callPerSecondPerCi = 2
 
 data Model = Model
     { models :: Array Int M.Model
@@ -62,7 +62,7 @@ subscriptions mm
     | isUn (m!0) = Sub.none
     | otherwise = Sub.batch
         [ Sub.udp M.servePort M.parseReceivedBytes
-        , Sub.timer 1 M.ProcessQueue
+        , Sub.timer 500 M.ProcessQueue
         ]
 
         where
@@ -113,6 +113,7 @@ update
         )
     )
     mm = updateExplicit msg mm (fst $ head sorted)
+
     where
         msg = M.Inbound t ci (KPacket transactionId (Query nodeid q) v)
 

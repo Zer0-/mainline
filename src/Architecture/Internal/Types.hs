@@ -27,19 +27,23 @@ data SubscriptionData msg
         , connectedSocket :: Maybe Socket
         , tcpHandler :: (BS.ByteString -> msg)
         }
+    | TCPClientDat
+        { info :: CompactInfo
+        , clientSocket :: Socket -- connectedSocket but that name is taken
+        , getMore :: (BS.ByteString -> Int)
+        , clientHandler :: (Received -> msg)
+        }
     | UDPDat
         { port :: Port
         , boundSocket :: Socket
         , udpHandler :: (CompactInfo -> Received -> msg)
         }
     | TimerDat
-        { seconds :: Int
+        { ms :: Int
         , timerHandler :: (POSIXTime -> msg)
         , lastTime :: POSIXTime
         }
 
-
---type InternalState msg = Map Int (SubscriptionData msg)
 
 type SubState msg = Map Int (SubscriptionData msg)
 

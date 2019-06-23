@@ -8,6 +8,8 @@ module Architecture.Internal.Sub
     , updateSubscriptions
     , readSubscriptions
     , openUDPPort
+    , connectTCP
+    , ciToAddr
     ) where
 
 import Control.Monad (foldM)
@@ -26,9 +28,11 @@ import Network.Socket
     , getAddrInfo
     , bind
     , listen
+    , connect
     , close
     , accept
     , hostAddressToTuple
+    , tupleToHostAddress
     )
 import Network.Socket.ByteString (recv, recvFrom)
 import System.Timeout (timeout)
@@ -41,13 +45,14 @@ import Architecture.Internal.Types
     , Received (..)
     , SubState
     )
+import Network.Octets (octets)
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
 import Network.Octets (fromOctets)
 
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
 maxline :: Int
-maxline = 2048
+maxline = 1472 -- 1500 MTU - 20 byte IPv4 header - 8 byte UDP header
 
 --In μs
 udpTimeout :: Int
@@ -56,18 +61,16 @@ udpTimeout = 10 * (((^) :: Int -> Int -> Int) 10 6)
 
 data TSub msg
     = TCP Port (BS.ByteString -> msg)
+    | TCPClient CompactInfo (BS.ByteString -> Int) (Received -> msg)
     | UDP Port (CompactInfo -> Received -> msg)
-    | Timer Int (POSIXTime -> msg) -- timeout in seconds
+    | Timer Int (POSIXTime -> msg) -- timeout in milliseconds
+
 
 instance Hashable (TSub msg) where
     hashWithSalt s (TCP p _) = s `hashWithSalt` (0 :: Int) `hashWithSalt` p
-    hashWithSalt s (UDP p _) = s `hashWithSalt` (1 :: Int) `hashWithSalt` p
-    hashWithSalt s (Timer t _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` t
-
-instance Show (TSub msg) where
-    show (TCP p _) = "TSUB_TCP:" ++ show p
-    show (UDP p _) = "TSUB_UDP:" ++ show p
-    show (Timer t _) = "TSUB_TIMER:" ++ show t
+    hashWithSalt s (TCPClient ci _ _) = s `hashWithSalt` (1 :: Int) `hashWithSalt` ci
+    hashWithSalt s (UDP p _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` p
+    hashWithSalt s (Timer t _) = s `hashWithSalt` (3 :: Int) `hashWithSalt` t
 
 
 newtype Sub msg = Sub [ TSub msg ]
@@ -88,8 +91,9 @@ updateSubscriptions substates (Sub tsubs) = do
             closem connectedSocket
             close listenSocket
 
-        unsub (UDPDat { boundSocket }) = do
-            close boundSocket
+        unsub (TCPClientDat { clientSocket }) = close clientSocket
+
+        unsub (UDPDat { boundSocket }) = close boundSocket
 
         unsub (TimerDat _ _ _) = return ()
 
@@ -97,6 +101,10 @@ updateSubscriptions substates (Sub tsubs) = do
         sub (TCP p f) = do
             sock <- openTCPPort p
             return $ TCPDat p sock Nothing f
+
+        sub (TCPClient ci g h) = do
+            sock <- connectTCP ci
+            return $ TCPClientDat ci sock g h
 
         sub (UDP p f) = do
             sock <- openUDPPort p
@@ -126,18 +134,23 @@ updateHandlers s tsubs = foldl something Map.empty tsubs
 
         updateHandler
             (TCP _ f)
-            (TCPDat {port, listenSocket, connectedSocket}) =
-                TCPDat {port, listenSocket, connectedSocket, tcpHandler=f}
+            (TCPDat { port, listenSocket, connectedSocket }) =
+                TCPDat { port, listenSocket, connectedSocket, tcpHandler=f }
 
         updateHandler
             (UDP _ f)
-            (UDPDat {port, boundSocket}) =
-                UDPDat {port, boundSocket, udpHandler=f}
+            (UDPDat { port, boundSocket }) =
+                UDPDat { port, boundSocket, udpHandler=f }
 
         updateHandler
             (Timer _ f)
-            (TimerDat {seconds, lastTime}) =
-                TimerDat seconds f lastTime
+            (TimerDat { ms, lastTime }) =
+                TimerDat ms f lastTime
+
+        updateHandler
+            (TCPClient _ g h)
+            (TCPClientDat { info, clientSocket }) =
+                TCPClientDat { info, clientSocket, getMore=g, clientHandler=h }
 
         updateHandler _  _ = undefined
 
@@ -158,10 +171,19 @@ bindSocket t p = do
             }
 
 
+-- Used by servers
 openTCPPort :: Port -> IO Socket
 openTCPPort p = do
     sock <- bindSocket Stream p
     listen sock 5
+    return sock
+
+
+-- Used by clients
+connectTCP :: CompactInfo -> IO Socket
+connectTCP ci = do
+    sock <- socket AF_INET Stream defaultProtocol
+    connect sock (ciToAddr ci)
     return sock
 
 
@@ -170,7 +192,7 @@ openUDPPort = bindSocket Datagram
 
 
 readSubscriptions :: SubState msg -> IO (SubState msg, [ msg ])
-readSubscriptions x = ((foldM ff (Map.empty, [])) . Map.assocs) x
+readSubscriptions = (foldM ff (Map.empty, [])) . Map.assocs
     where
         ff ::
             (SubState msg, [ msg ]) ->
@@ -200,6 +222,20 @@ readSub (TCPDat p lsnsc cnsc f) =
                 0 ->  return bss
                 _ -> recvAll (bss `BS.append` bs) sock
 
+readSub (TCPClientDat ci sock g h) = do
+    bytes <- more sock g BS.empty
+    now <- getPOSIXTime
+    return (TCPClientDat ci sock g h, Just $ h $ Received bytes now)
+
+    where
+        more s f msg
+            | f msg < 1 = do
+                bs <- recv s (f BS.empty)
+                return $ msg <> bs
+            | otherwise =
+                return msg
+
+
 readSub (UDPDat { port, boundSocket, udpHandler }) =
     (timeout udpTimeout (recvFrom boundSocket maxline))
     >>= maybe (return (subdata, Nothing)) handle
@@ -217,13 +253,14 @@ readSub (UDPDat { port, boundSocket, udpHandler }) =
                     (Received bs now)
                 )
 
-readSub (TimerDat {seconds, timerHandler, lastTime}) = do
+readSub (TimerDat {ms, timerHandler, lastTime}) = do
     now <- getPOSIXTime
-    if (now - lastTime) < fromIntegral seconds
+    if (now - lastTime) < (fromIntegral ms) / 1000
     then
-        return (TimerDat seconds timerHandler lastTime, Nothing)
+        return (TimerDat ms timerHandler lastTime, Nothing)
     else
-        return (TimerDat seconds timerHandler now, Just $ timerHandler now)
+        return (TimerDat ms timerHandler now, Just $ timerHandler now)
+
 
 closem :: Maybe Socket -> IO ()
 closem = maybe (return ()) close
@@ -238,3 +275,12 @@ addrToCi (SockAddrInet port host) =
         (fromIntegral port)
 
 addrToCi _ = undefined
+
+ciToAddr :: CompactInfo -> SockAddr
+ciToAddr (CompactInfo ip p) = SockAddrInet
+    (fromIntegral p)
+    (tupleToHostAddress
+        $ (\[a1, a2, a3, a4] -> (a1, a2, a3, a4))
+        $ octets ip)
+
+

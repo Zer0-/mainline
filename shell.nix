@@ -8,7 +8,7 @@ let
       , Crypto, HUnit, network, QuickCheck, stdenv, test-framework
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
       , DRBG, text, time, cabal-install, network-transport, cpu
-      , parsec, lrucache, safe-exceptions
+      , parsec, lrucache, #safe-exceptions
       }:
       mkDerivation {
         pname = "Mainline";
@@ -19,7 +19,7 @@ let
         libraryHaskellDepends = [ base ];
         executableHaskellDepends = [
           base bencoding bytestring containers Crypto network crypto-api
-          DRBG text time cpu parsec lrucache safe-exceptions
+          DRBG text time cpu parsec lrucache #safe-exceptions
         ];
         testHaskellDepends = [
           base bencoding bytestring containers Crypto HUnit QuickCheck

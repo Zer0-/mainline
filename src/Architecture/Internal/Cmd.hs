@@ -11,14 +11,11 @@ import qualified Data.Map as Map
 import qualified Data.ByteString as BS
 import Crypto.Random (newGenIO, genBytes)
 import Crypto.Random.DRBG (CtrDRBG)
-import Network.Socket (SockAddr (..), tupleToHostAddress)
-import Network.Socket.ByteString (sendTo)
+import Network.Socket.ByteString (sendTo, sendAll)
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import System.IO (hFlush, stdout)
-import Control.Exception.Safe (tryIO)
 
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
-import Network.Octets (octets)
 import Architecture.Internal.Types
     ( SubscriptionData (..)
     , InternalState (..)
@@ -26,6 +23,8 @@ import Architecture.Internal.Types
 import Architecture.Internal.Sub
     ( TSub (..)
     , openUDPPort
+    , connectTCP
+    , ciToAddr
     )
 
 data TCmd msg
@@ -34,6 +33,7 @@ data TCmd msg
     | CmdGetTime (POSIXTime -> msg)
     | CmdRandomBytes Int (BS.ByteString -> msg)
     | CmdSendUDP Port CompactInfo BS.ByteString
+    | CmdSendTCP CompactInfo BS.ByteString
     | CmdReadFile String (BS.ByteString -> msg)
     | CmdWriteFile String BS.ByteString
 
@@ -48,7 +48,8 @@ execTCmd state (CmdGetRandom f) =
 execTCmd state (CmdGetTime f) =
     getPOSIXTime >>= \t -> return (state, Just $ f t)
 
-execTCmd state (CmdLog msg) = putStr msg >> hFlush stdout >> return (state, Nothing)
+execTCmd state (CmdLog msg) =
+    putStr msg >> hFlush stdout >> return (state, Nothing)
 
 execTCmd state (CmdRandomBytes n f) =
     do
@@ -71,36 +72,22 @@ execTCmd state (CmdWriteFile filename bs) =
         return (state, Nothing)
 
 
+execTCmd state (CmdSendUDP _ (CompactInfo ip 0) _) =
+    execTCmd state $ CmdLog msg
+
+    where
+        msg = "Error: Cannot send message to " ++ show (CompactInfo ip 0)
+            ++ ". Invalid port 0!"
+
 execTCmd state (CmdSendUDP srcPort dest bs) =
     do
         (newSubStates, sock) <- getSock
 
-        --sendTo has failed before with:
-        --Mainline: Network.Socket.sendBufTo: invalid argument (Invalid argument)
-        sendResult <- tryIO $ sendTo sock bs sockaddr
+        _ <- sendTo sock bs (ciToAddr dest)
 
-        either onSendErr (onSendOk newSubStates) sendResult
+        return (state { subState = newSubStates }, Nothing)
 
         where
-            onSendOk newSubStates _ =
-                return (state { subState = newSubStates }, Nothing)
-
-            onSendErr e = execTCmd state (CmdLog (errmsg e))
-
-            errmsg e
-                = "Error occurred while sending to "
-                ++  show dest ++ " -- " ++ show e ++ "\n"
-
-            sockaddr = ciToAddr dest
-
-            ciToAddr :: CompactInfo -> SockAddr
-            ciToAddr (CompactInfo ip p) = SockAddrInet
-                (fromIntegral p)
-                ( tupleToHostAddress
-                    $ (\[a1, a2, a3, a4] -> (a1, a2, a3, a4))
-                    $ octets ip)
-
-
             getSock =
                 maybe
                     ((openUDPPort srcPort) >>=
@@ -120,12 +107,41 @@ execTCmd state (CmdSendUDP srcPort dest bs) =
 
             key = hash (UDP srcPort undefined)
 
+execTCmd state (CmdSendTCP ci bs) = do
+    (newSubStates, sock) <- getSock
+
+    sendAll sock bs
+
+    return (state { subState = newSubStates }, Nothing)
+
+    where
+        getSock =
+            maybe
+                ((connectTCP ci) >>=
+                    \sock ->
+                        return
+                            ( Map.insert
+                                key
+                                (TCPClientDat ci sock undefined undefined)
+                                substates
+                            , sock
+                            )
+                )
+                (return . ((,) substates) . boundSocket)
+                (Map.lookup key substates)
+
+        substates = subState state
+
+        key = hash (TCPClient ci undefined undefined)
+
 
 execCmd :: InternalState msg -> Cmd msg -> IO (InternalState msg , [ msg ])
 execCmd state (Cmd l) = foldM ff (state, []) l
 
     where
-        ff :: (InternalState msg, [ msg ]) -> TCmd msg -> IO (InternalState msg, [ msg ])
+        ff :: (InternalState msg, [ msg ])
+           -> TCmd msg
+           -> IO (InternalState msg, [ msg ])
         ff (state2, msgs) tcmd =
             (execTCmd state2 tcmd)
                 >>=
