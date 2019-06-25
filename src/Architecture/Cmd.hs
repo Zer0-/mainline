@@ -28,7 +28,7 @@ import Architecture.Internal.Cmd
 
 -- TODO: use a config
 minLoglvl :: Int
-minLoglvl = fromEnum INFO
+minLoglvl = fromEnum DEBUG
 
 
 getRandom :: (Float -> msg) -> Cmd msg

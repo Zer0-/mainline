@@ -228,12 +228,12 @@ readSub (TCPClientDat ci sock g h) = do
     return (TCPClientDat ci sock g h, Just $ h $ Received bytes now)
 
     where
-        more s f msg
-            | f msg < 1 = do
+        more s f msg =
+            let n = f msg in
+            if n < 1 then return msg
+            else do
                 bs <- recv s (f BS.empty)
-                return $ msg <> bs
-            | otherwise =
-                return msg
+                more s f (msg <> bs)
 
 
 readSub (UDPDat { port, boundSocket, udpHandler }) =
@@ -282,5 +282,4 @@ ciToAddr (CompactInfo ip p) = SockAddrInet
     (tupleToHostAddress
         $ (\[a1, a2, a3, a4] -> (a1, a2, a3, a4))
         $ octets ip)
-
 
