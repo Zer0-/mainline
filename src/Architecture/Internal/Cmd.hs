@@ -127,7 +127,7 @@ execTCmd state (CmdSendTCP ci bs) = do
                             , sock
                             )
                 )
-                (return . ((,) substates) . boundSocket)
+                (return . ((,) substates) . clientSocket)
                 (Map.lookup key substates)
 
         substates = subState state
