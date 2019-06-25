@@ -3,7 +3,7 @@ import Data.Word (Word32)
 import Data.Hex (unhex, hex)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.Serialize (encode)
+import Data.Serialize (encode, decode)
 import Data.Default (def)
 import Data.Maybe (fromJust)
 import qualified Network.BitTorrent.Exchange.Message as BT
@@ -60,16 +60,18 @@ update (NewNodeID bs) Off = (Headers (fromByteString bs), Cmd.batch [ logmsg, se
 
 update (Got m) (Headers _) = (Off, logmsg) --(ExtensionHeaders, cmds)
     where
-        logmsg = Cmd.log Cmd.DEBUG [ "Have header", show (bytes m) ]
+        logmsg = Cmd.log Cmd.DEBUG [ "Have header", show handshake ]
+        handshake :: Either String BT.Handshake
+        handshake = decode $ bytes m
 
 update _ Off = (Off, Cmd.none)
 
 subscriptions :: Model -> Sub Msg
 subscriptions Off = Sub.none
-subscriptions (Headers _) = Sub.readTCP knownNodeInfo headerSize Got
+subscriptions (Headers _) = Sub.readTCP knownNodeInfo numToRead Got
     where
-        headerSize :: ByteString -> Int
-        headerSize bs
+        numToRead :: ByteString -> Int
+        numToRead bs
             = 1  -- length prefix
             + 19 -- "BitTorrent protocol"
             + 8  -- reserved
