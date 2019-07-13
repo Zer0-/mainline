@@ -1,62 +1,50 @@
-Notes
-
-What do we do with an added node?
-    -we give it's info in response to queries
-    -we send a queries to it
-    
-    -so an "added node" is one we have info about
-    -things like it's status, time last successful response, time sent 
-
-
-When do we "add" a node?
-    -put it in a bucket when it's good
-
-
-
-Elm type of arch?
--data Msg =
-    NewNode
-        { info :: NodeInfo
-        , timePinged :: Integer -- or whatever
-        }
-
--update :: Msg -> ServerState -> (ServerState, Cmd Msg)
-
-
-main =
-  Html.program
-    { init = init
-    , view = view
-    , update = update
-    , subscriptions = subscriptions
-    }
-
-data Config model msg =
-    Config
-    { init :: (model, Cmd msg)
-    , update :: msg -> model -> (model, Cmd msg)
-    , subscriptions :: model -> Sub msg
-    }
-
-run :: Config -> IO ()
-run Config { init, update, subscriptions } 
-
-
-main :: IO ()
-main = run cfg
-
-
-  decode Error Message: [Failed]
-*** Failed! Falsifiable (after 3 tests and 3 shrinks): 
-[]
-0
-"\31581"
-(used seed 5228145083336763597)
+- Trying 10,000 nodes on one port resulted in running out of memory (less than 8Gb were available)
+- About 330,000 nodes were added to the routing tables, my very rough estimate is that nodes add between
+  100 and 200 peers to their RT, so optimistically it's possible we were a third of the way there
+- This is before any kind of timed cleanup is implemented
 
 
 
 
 
------ More Notes
-- If we run out of ports, we can always kill our nodes and recreate them
-with different ids to sample the space.
+
+Plan
+====
+
+Maybe
+-----
+
+Move Mainline to Network.Mainline?
+Mainline/Scripts/SendUDPHello.hs to a common Runnables directory with App?
+Then we have Network.{Mainline, KRPC, Bittorrent}
+- but we still have all of the actual network calls under Architecture
+
+
+Priority
+--------
+
+Write a new executable to handle one thing:
+- take (InfoHash, [CompactInfo]) and get everything we can from the BitTorrent
+  protocol using bep_0009, which is to download the metainfo file, and store
+  that in a database (and index the document) so we can search it later.
+
+How?
+    - Handshake first
+    - Meaning open a socket (not accept, I don't think that's it). Send our
+      part first, then listen. According to the lib we rev one byte first then
+      read the rest according to its value. Can we recvAll or something?
+      - Likely, if we can parse the response this way, we can use recvAll, since
+        the lib uses sendAll to send the initiating handshake payload, and
+        recvAll works with TCP sockets.
+
+    - right now there is no way to send a tcp message with Cmd and the accepted
+      socket is closed before every read (if it exists)
+    - what if we simply keep track of if we initiated the connection or not,
+      that would determine if we're a client or server, and in the case of
+      a client it would be up to the subscription to terminate the connection.
+
+
+Misc
+----
+
+    - singleton function can create a Bitfield (from bittorrent package)
