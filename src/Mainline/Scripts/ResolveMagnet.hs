@@ -179,41 +179,6 @@ update
                 [ "Have whole info dict"
                 , show $ (B.decode (combineBlocks blocks2) :: Either String BTT.InfoDict)
                 ]
-        -- store piece in blocks
-        -- if | blocks | = number of pieces then we're done, parse
-        -- the info dict and print it, also hash it and compare with original
-        -- info hash (must match)
-        --
-        -- if we're not done request the next piece
-
--- From bep_0009:
---
--- """
--- The metadata is handled in blocks of 16KiB (16384 Bytes). The metadata
--- blocks are indexed starting at 0. All blocks are 16KiB except the last block
--- which may be smaller.
---"""
---
---We actually have the total size of metadata in the extended handshake
---
---There are now three types of possible messages, all using the extension proto
--- (which means they all start with a length, 1 byte of "20" and 1 byte of
--- whatever number the response ExtensionHandshake specified ExtMetadata to be and then
--- a bencoded dict)
--- We need to send a request for a piece (and the number of pieces and which piece
---      - Create a Bitfield to keep track of pieces?
---      - maybe use
---          haveNone :: PieceCount -> Bitfield
---      - or just store the completed ones in a set and check against that.
---              - 1MB / 16k = 66 pieces, small sets for each torrent in progress
---
--- Create response for this request
---
--- -Torrent files are between 25Kb and 1.1Mb
---
--- is for us to figure out) and await a response (or reject) and do this for all
--- pieces.
-
 
 update
     (Got (Right (BT.Available _)))
