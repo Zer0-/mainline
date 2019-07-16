@@ -1,7 +1,8 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
 import Prelude hiding (init)
-import Data.Word (Word32)
+import Control.Applicative (liftA2)
+import Data.Word (Word8, Word32)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Hex (unhex, hex)
@@ -27,8 +28,6 @@ import qualified Architecture.Sub as Sub
 import qualified Architecture.Cmd as Cmd
 import Architecture.Cmd (Cmd)
 
-import Debug.Trace (traceShow)
-
 knownNodeHost :: Word32
 knownNodeHost = fromOctets [ 192, 168, 4, 2 ]
 
@@ -39,7 +38,7 @@ knownNodeInfo :: CompactInfo
 knownNodeInfo = CompactInfo knownNodeHost knownNodePort
 
 testHash :: String
-testHash = "139945d35fc1751c6bd144f0de7b5a124d09df79"
+testHash = "039945d35fc1751c6bd144f0de7b5a124d09df79"
 
 metadataBlocksize :: Int
 metadataBlocksize = 16384
@@ -50,12 +49,14 @@ data Model
     | ExtensionHandshake
     | Downloading
         { metadataSize :: Int
+        , extMetadataMsgid :: Word8
         , lastBlkRequested :: Int
         , blocks :: Map Int ByteString
         }
 
 data Msg
     = NewNodeID ByteString
+    | GotHandshake (Either String BT.Handshake)
     | Got (Either String BT.Message)
 
 config :: Config Model Msg
@@ -75,7 +76,8 @@ update (NewNodeID bs) Off = (Handshake, Cmd.batch [ logmsg, sendHandshake ])
             (BTT.InfoHash $ fromJust $ unhex $ stringpack testHash)
             (BT.PeerId bs)
 
-update (Got handshake) Handshake = (ExtensionHandshake, Cmd.batch [ logmsg, sendCmd ])
+update (GotHandshake handshake) Handshake =
+    (ExtensionHandshake, Cmd.batch [ logmsg, sendCmd ])
     where
         logmsg = Cmd.log Cmd.DEBUG
             [ "Have handshake:", show handshake
@@ -100,39 +102,36 @@ update
         ( Right
             ( BT.Extended
                 ( BT.EHandshake
-                    ( BT.ExtendedHandshake { BT.ehsMetadataSize = msize }
+                    ( BT.ExtendedHandshake
+                        { BT.ehsMetadataSize = msize
+                        , BT.ehsCaps = exts
+                        }
                     )
                 )
             )
         )
     )
     ExtensionHandshake =
-        case msize of
+        case (liftA2 (,)) msize mExtmMsgId of
             Nothing -> (Off, errmsg)
-            Just size ->
-                ( Downloading size 0 Map.empty
-                , sendCmd
+            Just (size, msgid) ->
+                ( Downloading size msgid 0 Map.empty
+                , Cmd.batch [ logmsg, mkSendCmd msgid ]
                 )
         where
             errmsg = Cmd.log Cmd.WARNING
                 [ "Could not get size from handshake response." ]
 
-            sendCmd = Cmd.sendTCP knownNodeInfo (encode request)
+            logmsg = Cmd.log Cmd.DEBUG
+                [
+                "Have size from extended handshake:"
+                , show msize
+                , "supports extensions:"
+                , show exts
+                ]
 
-            --TODO: check for zero size
-            --request block 0
-            request = BT.Extended $ BT.EMetadata 1 (BT.MetadataRequest 0)
-
-            -- create Set to hold done and maybe in-progress pieces
-            -- create last ix requested, increment it. If that is out of bounds
-            -- perform a search where we get the first ix that isn't in done and isn't
-            -- the last ix requested
-            --
-            -- calculate the number of total pieces
-            --  -first we need to get the size of the info dict in bytes from
-            --  the handshake response. Call it T ✓.
-            --  cieling(T / 16384 bytes) = number of blocks
-            --  blocks are indexed starting at zero
+            mExtmMsgId = Map.lookup BT.ExtMetadata (BT.extendedCaps exts)
+            mkSendCmd msgid = pieceReq msgid 0 knownNodeInfo
 
 update
     ( Got
@@ -149,10 +148,19 @@ update
             )
         )
     )
-    (Downloading { metadataSize, lastBlkRequested, blocks }) =
+    ( Downloading
+        { metadataSize
+        , extMetadataMsgid
+        , lastBlkRequested
+        , blocks
+        }
+    ) =
         case nextblk of
             Nothing -> (Off, logmsgs)
-            (Just i) -> (Downloading metadataSize i blocks2, mkSend i)
+            (Just i) ->
+                ( Downloading metadataSize extMetadataMsgid i blocks2
+                , Cmd.batch [ logmsg, pieceReq extMetadataMsgid i knownNodeInfo ]
+                )
 
         where
             blocks2 :: Map Int ByteString
@@ -162,7 +170,10 @@ update
 
             nextblk = chooseNextBlk lastBlkRequested nblks blocks2
 
-            mkSend i = Cmd.sendTCP knownNodeInfo (encode (pieceReq i))
+            logmsg = Cmd.log Cmd.DEBUG
+                [ "got block" , show blk
+                , "size:" , show $ BS.length blkbs
+                ]
 
             logmsgs = Cmd.log Cmd.INFO
                 [ "Have whole info dict"
@@ -204,12 +215,31 @@ update
 -- pieces.
 
 
+update
+    (Got (Right (BT.Available _)))
+    (Downloading { metadataSize, extMetadataMsgid, lastBlkRequested, blocks }) =
+        ( Downloading
+            { metadataSize
+            , extMetadataMsgid
+            , lastBlkRequested
+            , blocks
+            }
+        , logmsg
+        )
+
+        where
+            logmsg = Cmd.log
+                Cmd.DEBUG
+                [ "Ignoring Available response from server" ]
+
 update _ Off = (Off, Cmd.none)
 
 
 subscriptions :: Model -> Sub Msg
 subscriptions Off = Sub.none
-subscriptions Handshake = Sub.readTCP knownNodeInfo numToRead recvToMsg
+subscriptions Handshake =
+    Sub.readTCP knownNodeInfo numToRead (GotHandshake . decode . bytes)
+
     where
         numToRead :: ByteString -> Int
         numToRead bs
@@ -220,7 +250,7 @@ subscriptions Handshake = Sub.readTCP knownNodeInfo numToRead recvToMsg
             + 20 -- NodeID
             - BS.length bs
 
-subscriptions _ = Sub.readTCP knownNodeInfo numToRead recvToMsg
+subscriptions _ = Sub.readTCP knownNodeInfo numToRead (Got . decode . bytes)
     where
         numToRead :: ByteString -> Int
         numToRead bs
@@ -230,11 +260,11 @@ subscriptions _ = Sub.readTCP knownNodeInfo numToRead recvToMsg
         expectedLen :: ByteString -> Int
         expectedLen b = fromIntegral ((fromByteString b) :: Word32)
 
-recvToMsg :: Received -> Msg
-recvToMsg r = Got $ decode $ (traceShow (BS.length $ bytes r) (bytes r))
 
 numBlks :: Int -> Int
-numBlks size = ceiling ((fromIntegral size) / (fromIntegral metadataBlocksize))
+numBlks size =
+    ceiling
+    (((fromIntegral size) / (fromIntegral metadataBlocksize)) :: Float)
 
 chooseNextBlk :: Int -> Int -> Map Int a -> Maybe Int
 chooseNextBlk lastBlkRequested nblks haveblks =
@@ -251,8 +281,12 @@ chooseNextBlk lastBlkRequested nblks haveblks =
 combineBlocks :: Map Int ByteString -> ByteString
 combineBlocks blks = BS.concat $ map snd (sortOn fst (Map.assocs blks))
 
-pieceReq :: Int -> BT.Message
-pieceReq i = BT.Extended $ BT.EMetadata 1 (BT.MetadataRequest i)
+pieceReq :: Word8 -> Int -> CompactInfo -> Cmd Msg
+pieceReq msgid i ci =
+    Cmd.sendTCP
+    ci
+    (encode (BT.Extended $ BT.EMetadata msgid (BT.MetadataRequest i)))
+
 
 main :: IO ()
 main = run config

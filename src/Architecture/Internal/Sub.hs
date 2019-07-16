@@ -232,7 +232,7 @@ readSub (TCPClientDat ci sock g h) = do
             let n = f msg in
             if n < 1 then return msg
             else do
-                bs <- recv s (f BS.empty)
+                bs <- recv s n
                 more s f (msg <> bs)
 
 
