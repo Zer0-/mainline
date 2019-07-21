@@ -16,9 +16,11 @@ module Mainline.Mainline
 
 
 import Prelude hiding (init, log, filter)
+import qualified Data.List as L
 import Data.ByteString (ByteString, empty)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map             as Map
+import qualified Data.Set             as Set
 import Data.Set                      (fromAscList, filter)
 import Data.Word                     (Word32)
 import Data.BEncode                  (encode, decode)
@@ -99,6 +101,8 @@ tidsize = 4
 tokensize :: Int
 tokensize = 8
 
+responseTimeout :: Int
+responseTimeout = 60
 
 {- Data Structures -}
 
@@ -132,6 +136,8 @@ data Msg
         , tid           :: ByteString
         }
     | ProcessQueue POSIXTime
+    | TimeoutTransactions POSIXTime
+    | MaintainPeers POSIXTime
 
 data ServerState = ServerState
     { transactions :: Transactions
@@ -423,6 +429,52 @@ update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
             , show ci
             , show kpacket
             ]
+
+update (TimeoutTransactions now) (Ready state) =
+    (Ready state { transactions = newtrns }, log)
+
+    where
+        want :: [[(NodeID, ByteString, TransactionState)]]
+        want = map
+            (\(ci, m) -> [(ci, bs, tstate) | (bs, tstate) <- Map.assocs m])
+            (Map.assocs trns)
+
+        removes :: [[(NodeID, ByteString, TransactionState)]]
+        removes = L.filter (not . null) $ map (L.filter ff) want
+
+        log = Cmd.log Cmd.DEBUG [ "removed",
+            show (sum $ map length removes), "timed out transactions" ]
+
+        ff (_, _, tstate) =
+            now - (timeSent tstate) >= fromIntegral responseTimeout
+
+        trns = transactions state
+
+        newtrns :: Transactions
+        newtrns = L.foldl' f trns removes
+
+        f :: Transactions -> [(NodeID, ByteString, a)] -> Transactions
+        f t [] = t
+        f t ts = Map.update (g ts) (myfst $ head ts) t
+
+        g :: [(NodeID, ByteString, a)]
+          -> Map.Map ByteString TransactionState
+          -> Maybe (Map.Map ByteString TransactionState)
+        g ts m
+            | length ts == Map.size m = Nothing
+            | otherwise = Just $ Map.withoutKeys m (Set.fromList (map mysnd ts))
+
+        myfst :: (a, b, c) -> a
+        myfst (x, _, _) = x
+
+        mysnd :: (a, b, c) -> b
+        mysnd (_, x, _) = x
+
+update (MaintainPeers now) (Ready state) =
+    (Ready state, Cmd.none)
+
+update (TimeoutTransactions _) m = (m, Cmd.none)
+update (MaintainPeers _) m = (m, Cmd.none)
 
 
 -- Explicitly list undefined states

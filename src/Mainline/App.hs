@@ -7,6 +7,7 @@ import Data.Array (Array, listArray, indices, (!), (//), assocs)
 import Data.List (sortBy, foldl')
 import Data.Bits (xor)
 import Data.Function (on)
+import Data.Foldable (toList)
 import Data.Cache.LRU (LRU, newLRU, lookup, insert)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (hashWithSalt, hash)
@@ -63,6 +64,8 @@ subscriptions mm
     | otherwise = Sub.batch
         [ Sub.udp M.servePort M.parseReceivedBytes
         , Sub.timer 500 M.ProcessQueue
+        , Sub.timer (60 * 1000) M.TimeoutTransactions
+        --, Sub.timer (5 * 60 * 1000) M.MaintainPeers
         ]
 
         where
@@ -188,6 +191,12 @@ update (ProcessQueue now) m = foldl' f (m { queue = [] }, Cmd.none) (queue m)
                     model
             in (model2, Cmd.batch [cmds, cmds2])
 
+update (M.TimeoutTransactions now) m =
+    propagateTimer (M.TimeoutTransactions now) m
+
+update (M.MaintainPeers now) m =
+    propagateTimer (M.MaintainPeers now) m
+
 
 updateExplicit :: M.Msg -> Model -> Int -> (Model, Cmd M.Msg)
 updateExplicit msg model ix = (model { models = m // [(ix, mm)] }, cmds)
@@ -195,6 +204,14 @@ updateExplicit msg model ix = (model { models = m // [(ix, mm)] }, cmds)
         m = models model
         (mm, cmds) = M.update msg (m!ix)
 
+propagateTimer :: M.Msg -> Model -> (Model, Cmd M.Msg)
+propagateTimer msg m = (m { models = models2 }, cmds)
+    where
+        modelCmds = fmap f (models m)
+        f = M.update msg
+
+        models2 = fmap fst modelCmds
+        cmds = Cmd.batch $ toList $ fmap snd modelCmds
 
 sendOrQueue
     :: Either (LRU Int POSIXTime) (LRU Int POSIXTime)
@@ -206,7 +223,7 @@ sendOrQueue
 sendOrQueue result key msg idx m =
     case result of
         (Left cache) ->
-            ( m { tcache = cache, queue = (idx, key, msg) : (queue m) }
+            ( m { tcache = cache, queue = queue m ++ [(idx, key, msg)] }
             , Cmd.none
             )
 
