@@ -32,28 +32,43 @@ import Network.Transport.Internal (decodeWord16, decodeWord32)
 
 --import Debug.Trace
 
+bucketsize :: Bucket a -> Int
+bucketsize (Split a b) = bucketsize a + bucketsize b
+bucketsize b = Set.size $ bucketData b
+
 prop_fits :: Word32 -> Int -> Word32 -> Word32 -> Word32 -> Bool
 prop_fits bid size bmin bmax value =
     fits value bucket == fits value (split bucket)
     where bucket = Bucket bid size bmin bmax Set.empty
 
 prop_size :: Word32 -> [Word32] -> Bool
-prop_size bid xs = sizeof (foldr (\j b -> insert j b) bucket (nub xs)) == len
+prop_size bid xs = bucketsize (foldr insert bucket (nub xs)) == len
     where len = length $ nub xs
           bucket = Bucket bid len minBound maxBound Set.empty
-          sizeof (Split a b) = sizeof a + sizeof b
-          sizeof b = Set.size $ bucketData b
 
 prop_bounds :: Word32 -> Int -> [Word32] -> Bool
 prop_bounds bid bsize xs
     | bsize < 1 = True
     | otherwise = bounds filledBucket == bounds bucket
     where
-        filledBucket = foldr (\j b -> insert j b) bucket (nub xs)
+        filledBucket = foldr insert bucket (nub xs)
         bounds (Split a b) = (fst $ bounds a, snd $ bounds b)
         bounds (Bucket _ _ min_ max_ _) = (min_, max_)
         bucket = Bucket bid bsize minBound maxBound Set.empty
 
+prop_delete :: Word32 -> Int -> [Word32] -> Bool
+prop_delete bid bsize xs
+    | bsize < 1 = True
+    | otherwise = bucketsize emptyBucket == 0
+    where
+        bucket :: Bucket Word32
+        bucket = Bucket bid bsize minBound maxBound Set.empty
+
+        filledBucket :: Bucket Word32
+        filledBucket = foldr insert bucket (nub xs)
+
+        emptyBucket :: Bucket Word32
+        emptyBucket = foldr delete filledBucket xs
 
 
 word16_bytestring_conversion :: [Word8] -> Bool
@@ -353,6 +368,7 @@ tests =
         [ testProperty "Fits into bucket and split"              prop_fits
         , testProperty "Always store things in boundless bucket" prop_size
         , testProperty "Insert should return same sized bucket"  prop_bounds
+        , testProperty "Remove everything should yield empty"    prop_delete
         ]
     , testGroup "Words Octets instance is reversable"
         [ testProperty "ByteString to Word16 is reversable"      word16_bytestring_bijection

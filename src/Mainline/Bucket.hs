@@ -46,7 +46,7 @@ getId b = bucketId b
 insert :: (Ord a, Integral a) => a -> Bucket a -> Bucket a
 insert value (Split a b)
     | fits value a = Split (insert value a) b
-    | otherwise = Split a (insert value b)
+    | otherwise    = Split a (insert value b)
 
 insert value bucket
     | Set.size bset < bucketSize bucket =
@@ -57,17 +57,37 @@ insert value bucket
     where
         bset = bucketData bucket
 
+delete :: Ord a => a -> Bucket a -> Bucket a
+delete val (Split a b)
+    | fits val a =
+        let new = delete val a in
+            case new of
+                Bucket {} ->
+                    if Set.null (bucketData new) then b
+                    else Split new b
+                _ -> Split new b
+    | otherwise =
+        let new = delete val b in
+            case new of
+                Bucket {} ->
+                    if Set.null (bucketData new) then a
+                    else Split a new
+                _ -> Split a new
+
+delete val bucket =
+    bucket { bucketData = Set.delete val (bucketData bucket) }
+
 
 -- This can return true given a non-root Bucket and value
 -- that belongs outside of it's range.
 willInsert :: (Ord a) => a -> Bucket a -> Bool
 willInsert value (Split a b)
     | fits value a = willInsert value a
-    | otherwise = willInsert value b
+    | otherwise    = willInsert value b
 
 willInsert _ bucket
     | Set.size bset < bucketSize bucket = True
-    | fits (bucketId bucket) bucket = True
-    | otherwise = False
+    | fits (bucketId bucket) bucket     = True
+    | otherwise                         = False
     where
         bset = bucketData bucket

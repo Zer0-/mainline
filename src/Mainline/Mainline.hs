@@ -43,6 +43,9 @@ import Mainline.RoutingTable
     , exists
     , willAdd
     , nclosest
+    , questionable
+    , remove
+    , updateTime
     )
 import Network.KRPC.Types
     ( Port
@@ -159,7 +162,7 @@ data TransactionState = TransactionState
 
 type Transactions = Map.Map NodeID (Map.Map ByteString TransactionState)
 
-data Action = Warmup deriving Eq
+data Action = Warmup | KeepAlive deriving Eq
 
 
 {-
@@ -337,8 +340,8 @@ update (SendResponse { targetNode, body, tid }) (Ready s) =
 -- Receive a message
 update
     (Inbound now client (KPacket { transactionId, message, version }))
-    (Ready ServerState { transactions, conf, routingTable }) =
-        ( Ready newState
+    (Ready ServerState { transactions, conf, routingTable = rt }) =
+        ( Ready state3
         , Cmd.batch
             [ Cmd.log
                 Cmd.DEBUG
@@ -357,13 +360,13 @@ update
                         , show client
                         ]
                 )
-                mtState
+                mTState
             , cmd
             ]
         )
 
         where
-            mtState =
+            mTState =
                 nodeid >>= \nid -> getMTstate nid transactions transactionId
 
             nodeid = case message of
@@ -376,10 +379,10 @@ update
             state1 = ServerState
                 { transactions
                 , conf
-                , routingTable
+                , routingTable = rt
                 }
 
-            mkstate2 = \nid -> ServerState
+            withoutTransaction = \nid -> ServerState
                 { transactions = (
                     Map.update
                         ( \trsns ->
@@ -392,10 +395,10 @@ update
                         transactions
                     )
                 , conf
-                , routingTable
+                , routingTable = rt
                 }
 
-            (newState, cmd) = case message of
+            (state2, cmd) = case message of
                 (Query nid qdat) ->
                     respond
                         (NodeInfo nid client)
@@ -403,21 +406,29 @@ update
                         now
                         qdat
                         state1
-                (Response nid rdat) -> case mtState of
+                (Response nid rdat) -> case mTState of
                     (Just tranState) ->
                         handleResponse
                             (NodeInfo nid client)
                             tranState
                             now
                             rdat
-                            (mkstate2 nid)
+                            (withoutTransaction nid)
                     Nothing -> logHelper
                         (NodeInfo nid client)
                         (Response nid rdat)
                         "Ignoring a response that wasn't in our transaction state from"
-                        (mkstate2 nid)
+                        (withoutTransaction nid)
                 e ->
                     logErr client e state1
+
+            state3 = case nodeid of
+                (Just nid) ->
+                    state2
+                        { routingTable =
+                            updateTime (routingTable state2) nid now
+                        }
+                Nothing -> state2
 
 update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
     ((Uninitialized1 conf tid), log)
@@ -430,7 +441,7 @@ update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
             ]
 
 update (TimeoutTransactions now) (Ready state) =
-    (Ready state { transactions = newtrns }, log)
+    (Ready state { transactions = newtrns, routingTable = newrt }, log)
 
     where
         want :: [[(NodeID, ByteString, TransactionState)]]
@@ -440,9 +451,6 @@ update (TimeoutTransactions now) (Ready state) =
 
         removes :: [[(NodeID, ByteString, TransactionState)]]
         removes = L.filter (not . null) $ map (L.filter ff) want
-
-        log = Cmd.log Cmd.DEBUG [ "removed",
-            show (sum $ map length removes), "timed out transactions" ]
 
         ff (_, _, tstate) =
             now - (timeSent tstate) >= fromIntegral responseTimeout
@@ -469,8 +477,47 @@ update (TimeoutTransactions now) (Ready state) =
         mysnd :: (a, b, c) -> b
         mysnd (_, x, _) = x
 
+        mythrd :: (a, b, c) -> c
+        mythrd (_, _, x) = x
+
+        newrt :: RoutingTable
+        newrt = L.foldl' rm (routingTable state) removes
+
+        rm :: RoutingTable
+           -> [(NodeID, ByteString, TransactionState)]
+           -> RoutingTable
+        rm rt ts = L.foldl' onRemove rt (map mythrd ts)
+
+        onRemove :: RoutingTable -> TransactionState -> RoutingTable
+        onRemove rt (TransactionState { action = KeepAlive, recipient }) =
+            remove rt (nodeId recipient)
+        onRemove rt _ = rt
+
+        log = Cmd.log Cmd.DEBUG [ "removed",
+            show (sum $ map length removes), "timed out transactions" ]
+
+
 update (MaintainPeers now) (Ready state) =
-    (Ready state, Cmd.none)
+    (Ready state, Cmd.batch $ map prepareQuery q)
+
+    where
+        q :: [ Node ]
+        q = questionable (routingTable state) now
+
+        prepareQuery :: Node -> Cmd Msg
+        prepareQuery node = Cmd.randomBytes
+            tidsize
+            (\newid -> SendMessage
+                { idx        = index $ conf state
+                , sendAction = KeepAlive
+                , targetNode = (info node)
+                , body       = (Query ourid Ping)
+                , newtid     = newid
+                , when       = now
+                }
+            )
+
+        ourid = ourId $ conf $ state
 
 update (TimeoutTransactions _) m = (m, Cmd.none)
 update (MaintainPeers _) m = (m, Cmd.none)

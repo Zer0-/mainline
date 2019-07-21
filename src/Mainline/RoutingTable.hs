@@ -9,6 +9,9 @@ module Mainline.RoutingTable
     , willAdd
     , nclosest
     , changeNode
+    , questionable
+    , remove
+    , updateTime
     ) where
 
 import qualified Data.Map as Map
@@ -23,6 +26,7 @@ import Mainline.Bucket
     , insert
     , willInsert
     , getId
+    , delete
     )
 import Network.KRPC.Types (NodeID, NodeInfo (..))
 
@@ -30,6 +34,8 @@ import Network.KRPC.Types (NodeID, NodeInfo (..))
 bucketsize :: Int
 bucketsize = 8
 
+minQDurationSeconds :: Int
+minQDurationSeconds = 15 * 60
 
 data Node = Node
     { lastMsgTime       :: POSIXTime
@@ -97,3 +103,20 @@ nclosest nid n rt = map info $ take n $ sortBy f $ Map.elems $ nodes rt
 
 
         getid = (nodeId . info)
+
+
+questionable :: RoutingTable -> POSIXTime -> [ Node ]
+questionable rt now = filter f $ Map.elems $ nodes rt
+    where
+        f :: Node -> Bool
+        f n = lastMsgTime n < now - (fromIntegral minQDurationSeconds)
+
+
+remove :: RoutingTable -> NodeID -> RoutingTable
+remove RoutingTable { bucket, nodes } nid =
+    RoutingTable (delete nid bucket) (Map.delete nid nodes)
+
+
+updateTime :: RoutingTable -> NodeID -> POSIXTime -> RoutingTable
+updateTime rt nid now =
+    rt { nodes = Map.adjust (\n -> n { lastMsgTime = now }) nid (nodes rt) }
