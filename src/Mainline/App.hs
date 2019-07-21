@@ -65,7 +65,7 @@ subscriptions mm
         [ Sub.udp M.servePort M.parseReceivedBytes
         , Sub.timer 500 M.ProcessQueue
         , Sub.timer (60 * 1000) M.TimeoutTransactions
-        --, Sub.timer (5 * 60 * 1000) M.MaintainPeers
+        , Sub.timer (5 * 60 * 1000) M.MaintainPeers
         ]
 
         where

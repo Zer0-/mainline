@@ -2,7 +2,6 @@
 
 module Mainline.RoutingTable
     ( Node (..)
-    , NodeStatus (..)
     , RoutingTable (..)
     , initRoutingTable
     , uncheckedAdd
@@ -32,23 +31,9 @@ bucketsize :: Int
 bucketsize = 8
 
 
-data NodeStatus = Normal | BeingReplaced | BeingChecked
--- if a Node is BeingChecked, we need to find that TransactionState
--- in our transaction state (maybe put the tid into the NodeStatus(s)
--- and replace the information with that of BeingReplaced (as well as
--- the node's status) in the off-chance that the checked node will not
--- respond.
---
--- Add BeingAdded status because for every find_node iteration we can add many
--- nodes, and we don't want to ping those we can't add (because we thought
--- the bucket had room)
---      -decided not to do this
-
-
 data Node = Node
     { lastMsgTime       :: POSIXTime
     , info              :: NodeInfo
-    , status            :: NodeStatus
     }
 
 

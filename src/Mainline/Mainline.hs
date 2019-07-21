@@ -40,7 +40,6 @@ import Mainline.RoutingTable
     , RoutingTable
     , uncheckedAdd
     , Node (..)
-    , NodeStatus (..)
     , exists
     , willAdd
     , nclosest
@@ -641,9 +640,7 @@ handleResponse
     | otherwise = (state, Cmd.none)
         where
             logmsg = Cmd.log Cmd.INFO [ "Adding to routing table:", show node ]
-            rt = uncheckedAdd
-                    initialRt
-                    (Node now node Normal)
+            rt = uncheckedAdd initialRt (Node now node)
 
             initialRt = routingTable state
 
@@ -740,7 +737,7 @@ considerNode
     -> (ServerState, Cmd Msg)
 considerNode now state node
     | exists rt node = (state, Cmd.none)
-    | noOngoing && willAdd rt node = (state, pingThem)
+    | noOngoing && willAdd rt node = (state, prepareQuery)
     | otherwise = (state, Cmd.none)
         where
             noOngoing = (maybe True
@@ -751,7 +748,7 @@ considerNode now state node
 
             rt = routingTable state
 
-            pingThem = Cmd.randomBytes
+            prepareQuery = Cmd.randomBytes
                 tidsize
                 (\newid -> SendMessage
                     { idx        = index $ conf state
@@ -764,10 +761,6 @@ considerNode now state node
                 )
 
             ourid = ourId $ conf state
-    -- node exists in rt => (Model, Cmd.none)
-    -- node can be added (bucket not full or ourid in bucket) => send message
-    -- if nodes where lastMsgTime < (now - 15m) || status == BeingChecked
-    --      then send command or modify TransactionState
 
 
 parseReceivedBytes :: CompactInfo -> Received -> Msg
