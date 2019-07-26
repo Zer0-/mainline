@@ -11,6 +11,7 @@ let
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
       , DRBG, text, time, cabal-install, network-transport, cpu
       , parsec, lrucache, hex, cereal, data-default, bittorrent
+      , llvmPackages_6
       #safe-exceptions
       }:
       mkDerivation {
@@ -23,6 +24,7 @@ let
         executableHaskellDepends = [
           base bencoding bytestring containers Crypto network crypto-api
           DRBG text time cpu parsec lrucache cereal data-default bittorrent
+          llvmPackages_6.llvm
           #safe-exceptions
         ];
         testHaskellDepends = [

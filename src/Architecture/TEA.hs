@@ -7,11 +7,15 @@ module Architecture.TEA
 
 import Prelude hiding (init)
 import qualified Data.Map as Map
-import Architecture.Internal.Cmd (Cmd (Cmd), execCmd)
-import Architecture.Internal.Types (InternalState (..), SubState)
+import Architecture.Internal.Cmd (execCmd)
+import Architecture.Internal.Types
+    ( InternalState (..)
+    , SubState
+    , Cmd (..)
+    , Sub (..)
+    )
 import Architecture.Internal.Sub
-    ( Sub (..)
-    , updateSubscriptions
+    ( updateSubscriptions
     , readSubscriptions
     )
 import qualified Architecture.Cmd as Cmd
@@ -61,6 +65,7 @@ updateModelWithSubMsgs
     -> IO (SubState msg, Config model msg)
 updateModelWithSubMsgs substates cfg =
     do
+      -- This will have to be done in each individual thread for just one sub
       (newSubStates, msgs) <- readSubscriptions substates
 
       return $

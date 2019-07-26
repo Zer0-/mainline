@@ -1,9 +1,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
 module Architecture.Internal.Sub
-    ( TSub (..)
-    , Sub (..)
-    , SubscriptionData (..)
+    ( SubscriptionData (..)
     , Received (..)
     , updateSubscriptions
     , readSubscriptions
@@ -36,14 +34,16 @@ import Network.Socket
     )
 import Network.Socket.ByteString (recv, recvFrom)
 import System.Timeout (timeout)
-import Data.Hashable
+import Data.Hashable (hash)
 import qualified Data.ByteString as BS
-import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
+import Data.Time.Clock.POSIX (getPOSIXTime)
 
 import Architecture.Internal.Types
     ( SubscriptionData (..)
     , Received (..)
     , SubState
+    , TSub (..)
+    , Sub (..)
     )
 import Network.Octets (octets)
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
@@ -57,24 +57,6 @@ maxline = 1472 -- 1500 MTU - 20 byte IPv4 header - 8 byte UDP header
 --In μs
 udpTimeout :: Int
 udpTimeout = 10 * (((^) :: Int -> Int -> Int) 10 6)
-
-
-data TSub msg
-    = TCP Port (BS.ByteString -> msg)
-    | TCPClient CompactInfo (BS.ByteString -> Int) (Received -> msg)
-    | UDP Port (CompactInfo -> Received -> msg)
-    | Timer Int (POSIXTime -> msg) -- timeout in milliseconds
-
-
-instance Hashable (TSub msg) where
-    hashWithSalt s (TCP p _) = s `hashWithSalt` (0 :: Int) `hashWithSalt` p
-    hashWithSalt s (TCPClient ci _ _) = s `hashWithSalt` (1 :: Int) `hashWithSalt` ci
-    hashWithSalt s (UDP p _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` p
-    hashWithSalt s (Timer t _) = s `hashWithSalt` (3 :: Int) `hashWithSalt` t
-
-
-newtype Sub msg = Sub [ TSub msg ]
-
 
 updateSubscriptions :: SubState msg -> Sub msg -> IO (SubState msg)
 updateSubscriptions substates (Sub tsubs) = do

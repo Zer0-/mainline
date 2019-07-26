@@ -19,9 +19,12 @@ import Data.List (intercalate)
 import Data.ByteString (ByteString)
 import Data.Time.Clock.POSIX (POSIXTime)
 
-import Network.KRPC.Types (Port, CompactInfo)
+import Network.KRPC.Types
+    ( Port
+    , CompactInfo
+    )
 
-import Architecture.Internal.Cmd
+import Architecture.Internal.Types
     ( TCmd (..)
     , Cmd (..)
     )

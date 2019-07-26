@@ -1,7 +1,5 @@
 module Architecture.Internal.Cmd
-    ( TCmd (..)
-    , Cmd (..)
-    , execCmd
+    ( execCmd
     ) where
 
 import System.Random (randomIO)
@@ -12,34 +10,22 @@ import qualified Data.ByteString as BS
 import Crypto.Random (newGenIO, genBytes)
 import Crypto.Random.DRBG (CtrDRBG)
 import Network.Socket.ByteString (sendTo, sendAll)
-import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
+import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.IO (hFlush, stdout)
 
-import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
+import Network.KRPC.Types (CompactInfo (CompactInfo))
 import Architecture.Internal.Types
     ( SubscriptionData (..)
     , InternalState (..)
+    , Cmd (..)
+    , TCmd (..)
+    , TSub (..)
     )
 import Architecture.Internal.Sub
-    ( TSub (..)
-    , openUDPPort
+    ( openUDPPort
     , connectTCP
     , ciToAddr
     )
-
-data TCmd msg
-    = CmdLog String
-    | CmdGetRandom (Float -> msg)
-    | CmdGetTime (POSIXTime -> msg)
-    | CmdRandomBytes Int (BS.ByteString -> msg)
-    | CmdSendUDP Port CompactInfo BS.ByteString
-    | CmdSendTCP CompactInfo BS.ByteString
-    | CmdReadFile String (BS.ByteString -> msg)
-    | CmdWriteFile String BS.ByteString
-
-
-newtype Cmd msg = Cmd [ TCmd msg ]
-
 
 execTCmd :: InternalState msg -> TCmd msg -> IO (InternalState msg, Maybe msg)
 execTCmd state (CmdGetRandom f) =

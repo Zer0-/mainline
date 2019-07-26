@@ -14,11 +14,11 @@ import Data.Time.Clock.POSIX (POSIXTime)
 
 import Network.KRPC.Types (Port, CompactInfo)
 
-import Architecture.Internal.Sub
+import Architecture.Internal.Types
     ( TSub (..)
     , Sub (..)
-    , Received (..)
     )
+import Architecture.Internal.Sub (Received (..))
 
 tcp :: Port -> (ByteString -> msg) -> Sub msg
 tcp port h = Sub [ TCP port h ]
