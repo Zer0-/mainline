@@ -7,6 +7,7 @@ module Architecture.Internal.Types
     , Cmd (..)
     , TSub (..)
     , Sub (..)
+    , Config (..)
     ) where
 
 import Data.Map (Map)

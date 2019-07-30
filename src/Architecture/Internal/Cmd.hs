@@ -123,15 +123,11 @@ execTCmd state (CmdSendTCP ci bs) = do
 
 execCmd :: InternalState msg -> Cmd msg -> IO (InternalState msg , [ msg ])
 execCmd state (Cmd l) = foldM ff (state, []) l
-
     where
         ff :: (InternalState msg, [ msg ])
            -> TCmd msg
            -> IO (InternalState msg, [ msg ])
-        ff (state2, msgs) tcmd =
-            (execTCmd state2 tcmd)
-                >>=
-                    \ (state3, mmsg) ->
-                        return (state3, maybe msgs (: msgs) mmsg)
+        ff (state2, msgs) tcmd = (execTCmd state2 tcmd) >>=
+            \(state3, mmsg) -> return (state3, maybe msgs (: msgs) mmsg)
 
 -- execCmd (Cmd l) = (mapM execTCmd l) >>= (return . catMaybes)
