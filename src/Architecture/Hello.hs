@@ -33,8 +33,8 @@ subscriptions :: Model -> Sub Msg
 subscriptions n
     | n > 3 = Sub.none
     | otherwise = Sub.batch
-        [ Sub.udp 51416 (\_ -> Got)
-        , Sub.timer 10 Timeout
+        [ Sub.udp 51411 (\_ -> Got)
+        , Sub.timer 10000 Timeout
         ]
 
 config :: Config Model Msg

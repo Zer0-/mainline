@@ -1,13 +1,13 @@
 module Architecture.Internal.Types
-    ( SubscriptionData (..)
-    , Received (..)
+    ( Received (..)
     , InternalState (..)
-    , SubState
+    , SubHandler (..)
     , TCmd (..)
     , Cmd (..)
     , TSub (..)
     , Sub (..)
     , Config (..)
+    , CmdQ (..)
     ) where
 
 import Data.Map (Map)
@@ -17,7 +17,8 @@ import Network.Socket
     )
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (Hashable, hashWithSalt)
-import Control.Concurrent.STM (TVar)
+import Control.Concurrent (ThreadId)
+import Control.Concurrent.STM (TVar, TMVar, TQueue)
 
 import Network.KRPC.Types (Port, CompactInfo)
 
@@ -59,40 +60,31 @@ data Received = Received
     , time  :: POSIXTime
     }
 
+data CmdQ
+    = UDPQueue (TQueue (Port, CompactInfo, BS.ByteString))
+    | TCPQueue (TQueue (CompactInfo, BS.ByteString))
 
-data SubscriptionData msg
-    = TCPDat
-        { port :: Port
-        , listenSocket :: Socket
-        , connectedSocket :: Maybe Socket
-        , tcpHandler :: (BS.ByteString -> msg)
-        }
-    | TCPClientDat
-        { info :: CompactInfo
-        , clientSocket :: Socket -- connectedSocket but that name is taken
-        , getMore :: (BS.ByteString -> Int)
-        , clientHandler :: (Received -> msg)
-        }
-    | UDPDat
-        { port :: Port
-        , boundSocket :: Socket
-        , udpHandler :: (CompactInfo -> Received -> msg)
-        }
-    | TimerDat
-        { ms :: Int
-        , timerHandler :: (POSIXTime -> msg)
-        , lastTime :: POSIXTime
-        }
+data FutureSubscription
+    = TCPClientSub { connectedSocket :: Socket }
+    | UDPSub { boundSocket :: Socket }
 
 
--- Perhaps this should be a map of Int (hash) -> Handler
--- where data Handler
---      = TCPDatHandler (BS.ByteString -> msg)
---      | TimerDatHandler (POSIXTime -> msg)
---      ... etc
--- And the rest of the data is thread local
-type SubState msg = Map Int (SubscriptionData msg)
+data SubHandler msg
+    = TCPHandler (TVar (BS.ByteString -> msg))
+    | TCPClientHandler
+        ( TVar
+            ( BS.ByteString -> Int -- getMore
+            , Received -> msg --handler
+            )
+        )
+    | UDPHandler (TVar (CompactInfo -> Received -> msg))
+    | TimerHandler (TVar (POSIXTime -> msg))
 
-newtype InternalState msg = InternalState
-    { subState :: SubState msg
+
+data InternalState msg = InternalState
+    { readThreadS  :: Map Int (SubHandler msg, ThreadId)
+    , writeThreadS :: Map Int (CmdQ, ThreadId)
+    , cmdState     :: Map Int FutureSubscription
+    , subSink      :: TMVar (Sub msg)
+    , cmdSink      :: TQueue (TCmd msg)
     }

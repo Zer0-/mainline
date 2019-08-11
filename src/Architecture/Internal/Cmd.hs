@@ -5,6 +5,8 @@ module Architecture.Internal.Cmd
 import System.Random (randomIO)
 import Control.Monad (foldM)
 import Data.Hashable (hash)
+import Data.Maybe (catMaybes)
+import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.ByteString as BS
 import Crypto.Random (newGenIO, genBytes)
@@ -12,14 +14,16 @@ import Crypto.Random.DRBG (CtrDRBG)
 import Network.Socket.ByteString (sendTo, sendAll)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.IO (hFlush, stdout)
+import Control.Concurrent (ThreadId)
+import Control.Concurrent.STM (atomically, TQueue, writeTQueue)
 
 import Network.KRPC.Types (CompactInfo (CompactInfo))
 import Architecture.Internal.Types
-    ( SubscriptionData (..)
-    , InternalState (..)
+    ( InternalState (..)
     , Cmd (..)
     , TCmd (..)
     , TSub (..)
+    , CmdQ (..)
     )
 import Architecture.Internal.Sub
     ( openUDPPort
@@ -27,107 +31,86 @@ import Architecture.Internal.Sub
     , ciToAddr
     )
 
-execTCmd :: InternalState msg -> TCmd msg -> IO (InternalState msg, Maybe msg)
-execTCmd state (CmdGetRandom f) =
-    randomIO >>= \i -> return (state, Just $ f i)
+execTCmd
+    :: Map Int (CmdQ, ThreadId) -- writeThreadS
+    -> TQueue (TCmd msg)        -- cmdSink
+    -> TCmd msg
+    -> IO (Maybe msg)
+execTCmd _ _ (CmdGetRandom f) =
+    randomIO >>= \i -> return (Just $ f i)
 
-execTCmd state (CmdGetTime f) =
-    getPOSIXTime >>= \t -> return (state, Just $ f t)
+execTCmd _ _(CmdGetTime f) =
+    getPOSIXTime >>= \t -> return (Just $ f t)
 
-execTCmd state (CmdLog msg) =
-    putStr msg >> hFlush stdout >> return (state, Nothing)
+execTCmd _ _ (CmdLog msg) =
+    putStr msg >> hFlush stdout >> return (Nothing)
 
-execTCmd state (CmdRandomBytes n f) =
+execTCmd _ _ (CmdRandomBytes n f) =
     do
         g <- newGenIO :: IO CtrDRBG
 
         case genBytes n g of
             Left err -> error $ show err
-            Right (result, _) -> return (state, Just (f result))
+            Right (result, _) -> return (Just (f result))
 
 
-execTCmd state (CmdReadFile filename f) =
+execTCmd _ _ (CmdReadFile filename f) =
     do
         bytes <- BS.readFile filename
-        return (state, Just $ f bytes)
+        return (Just $ f bytes)
 
 
-execTCmd state (CmdWriteFile filename bs) =
+execTCmd _ _ (CmdWriteFile filename bs) =
     do
         BS.writeFile filename bs
-        return (state, Nothing)
+        return (Nothing)
 
 
-execTCmd state (CmdSendUDP _ (CompactInfo ip 0) _) =
-    execTCmd state $ CmdLog msg
+execTCmd _ _ (CmdSendUDP _ (CompactInfo ip 0) _) =
+    execTCmd undefined undefined $ CmdLog msg
 
     where
         msg = "Error: Cannot send message to " ++ show (CompactInfo ip 0)
             ++ ". Invalid port 0!"
 
-execTCmd state (CmdSendUDP srcPort dest bs) =
-    do
-        (newSubStates, sock) <- getSock
-
-        _ <- sendTo sock bs (ciToAddr dest)
-
-        return (state { subState = newSubStates }, Nothing)
-
-        where
-            getSock =
-                maybe
-                    ((openUDPPort srcPort) >>=
-                        \sock ->
-                            return
-                                ( Map.insert
-                                    key
-                                    (UDPDat srcPort sock undefined)
-                                    substates
-                                , sock
-                                )
-                    )
-                    (return . ((,) substates) . boundSocket)
-                    (Map.lookup key substates)
-
-            substates = subState state
-
-            key = hash (UDP srcPort undefined)
-
-execTCmd state (CmdSendTCP ci bs) = do
-    (newSubStates, sock) <- getSock
-
-    sendAll sock bs
-
-    return (state { subState = newSubStates }, Nothing)
-
+execTCmd wrT sink (CmdSendUDP srcPort dest bs) = sendNetTCmd wrT sink cmd key
     where
-        getSock =
-            maybe
-                ((connectTCP ci) >>=
-                    \sock ->
-                        return
-                            ( Map.insert
-                                key
-                                (TCPClientDat ci sock undefined undefined)
-                                substates
-                            , sock
-                            )
-                )
-                (return . ((,) substates) . clientSocket)
-                (Map.lookup key substates)
+        key = hash (UDP srcPort undefined)
+        cmd = CmdSendUDP srcPort dest bs
 
-        substates = subState state
-
+execTCmd wrT sink (CmdSendTCP ci bs) = sendNetTCmd wrT sink cmd key
+    where
         key = hash (TCPClient ci undefined undefined)
+        cmd = (CmdSendTCP ci bs)
 
 
-execCmd :: InternalState msg -> Cmd msg -> IO (InternalState msg , [ msg ])
-execCmd state (Cmd l) = foldM ff (state, []) l
-    where
-        ff :: (InternalState msg, [ msg ])
-           -> TCmd msg
-           -> IO (InternalState msg, [ msg ])
-        ff (state2, msgs) tcmd = (execTCmd state2 tcmd) >>=
-            \(state3, mmsg) -> return (state3, maybe msgs (: msgs) mmsg)
+execCmd
+    :: Map Int (CmdQ, ThreadId)
+    -> TQueue (TCmd msg)
+    -> Cmd msg
+    -> IO ([ msg ])
+execCmd wrT sink (Cmd l) = (mapM (execTCmd wrT sink) l) >>= (return . catMaybes)
 
--- execCmd (Cmd l) = (mapM execTCmd l) >>= (return . catMaybes)
+
+sendNetTCmd
+    :: Map Int (CmdQ, ThreadId)
+    -> TQueue (TCmd msg)
+    -> TCmd msg
+    -> Int
+    -> IO (Maybe msg)
+sendNetTCmd wrT sink cmd key = do
+    case Map.lookup key wrT of
+        (Just (cmdq, _)) -> enqueueCmd cmdq cmd
+        Nothing -> atomically $ writeTQueue sink cmd
+
+    return Nothing
+
+
+enqueueCmd :: CmdQ -> TCmd msg -> IO ()
+enqueueCmd (UDPQueue q) (CmdSendUDP p ci bs) =
+    atomically (writeTQueue q (p, ci, bs))
+
+enqueueCmd (TCPQueue q) (CmdSendTCP ci bs) =
+    atomically (writeTQueue q (ci, bs))
+
+enqueueCmd _ _ = undefined

@@ -11,6 +11,8 @@ import Control.Concurrent.STM
     ( STM
     , TVar
     , newTVar
+    , newEmptyTMVar
+    , newTQueue
     , readTVar
     , readTVarIO
     , writeTVar
@@ -20,15 +22,11 @@ import Control.Concurrent.STM
 import Architecture.Internal.Cmd (execCmd)
 import Architecture.Internal.Types
     ( InternalState (..)
-    , SubState
     , Cmd (..)
     , Sub (..)
     )
 import qualified Architecture.Internal.Types as T
-import Architecture.Internal.Sub
-    ( updateSubscriptions
-    , readSubscriptions
-    )
+import Architecture.Internal.Sub (updateSubscriptions)
 import qualified Architecture.Cmd as Cmd
 
 
@@ -69,57 +67,35 @@ foldMsgsStm up msgs tmodel = do
 runCmds
     :: InternalState msg
     -> T.Config model msg
-    -> IO (InternalState msg, T.Config model msg)
-runCmds states cfg =
+    -> IO (T.Config model msg)
+runCmds self cfg =
     do
-       (states2, msgs) <- execCmd states cmd
+       (msgs) <- execCmd (writeThreadS self) (cmdSink self) cmd
 
        case msgs of
-           [] -> return (states2, cfg)
+           [] -> return cfg
            _ -> atomically (foldMsgsStm (T.update cfg) msgs tmodel) >>=
-               \cmds -> runCmds states2 $ cfg { T.init = (tmodel, cmds) }
-
-    where
-        (tmodel, cmd) = T.init cfg
-
-
-updateModelWithSubMsgs
-    :: SubState msg
-    -> T.Config model msg
-    -> IO (SubState msg, T.Config model msg)
-updateModelWithSubMsgs substates cfg =
-    do
-        -- This will have to be done in each individual thread for just one sub
-        (newSubStates, msgs) <- readSubscriptions substates
-
-        cmds <- atomically (foldMsgsStm (T.update cfg) msgs tmodel)
-
-        return $
-          ( newSubStates
-          , cfg { T.init = (tmodel, Cmd.batch [cmd, cmds]) }
-          )
+               \cmds -> runCmds self $ cfg { T.init = (tmodel, cmds) }
 
     where
         (tmodel, cmd) = T.init cfg
 
 
 run2 :: InternalState msg -> T.Config model msg -> IO ()
-run2 internalState cfg =
+run2 self cfg =
     do
-        (internalState2, newcfg) <- runCmds internalState cfg
+        newcfg <- runCmds self cfg
 
         model <- readTVarIO $ fst $ T.init newcfg
 
-        substates <-
+        newself <-
             updateSubscriptions
-                (subState internalState2)
+                newcfg
+                self
                 ((T.subscriptions cfg) model)
 
-        case Map.null substates of
-            True -> return ()
-            False ->
-                updateModelWithSubMsgs substates newcfg
-                >>= \(s, c) -> run2 (internalState2 { subState = s }) c
+        return () -- Here we need to await subs or cmds
+
 
 mkInternalCfg :: Config model msg -> IO (T.Config model msg)
 mkInternalCfg (Config (m, cmd) fupdate subs) = do
@@ -127,4 +103,19 @@ mkInternalCfg (Config (m, cmd) fupdate subs) = do
     return $ T.Config (tmodel, cmd) fupdate subs
 
 run :: Config model msg -> IO ()
-run cfg = mkInternalCfg cfg >>= (run2 (InternalState Map.empty))
+run conf = do
+    cfg <- mkInternalCfg conf
+    (subsink, cmdsink) <- atomically $ do
+        subsink <- newEmptyTMVar
+        cmdsink <- newTQueue
+        return (subsink, cmdsink)
+
+    run2
+        ( InternalState
+            Map.empty
+            Map.empty
+            Map.empty
+            subsink
+            cmdsink
+        )
+        cfg

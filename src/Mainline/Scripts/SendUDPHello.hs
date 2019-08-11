@@ -11,7 +11,7 @@ servePort :: Port
 servePort = 51412
 
 seedNodePort :: Port
-seedNodePort = 51416
+seedNodePort = 51411
 --seedNodePort = 51412
 
 seedNodeHost :: Word32
