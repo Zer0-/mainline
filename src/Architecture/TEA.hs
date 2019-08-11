@@ -97,18 +97,15 @@ run2 self cfg =
         return () -- Here we need to await subs or cmds
 
 
-mkInternalCfg :: Config model msg -> IO (T.Config model msg)
-mkInternalCfg (Config (m, cmd) fupdate subs) = do
-    tmodel <- atomically (newTVar m)
-    return $ T.Config (tmodel, cmd) fupdate subs
-
 run :: Config model msg -> IO ()
-run conf = do
-    cfg <- mkInternalCfg conf
-    (subsink, cmdsink) <- atomically $ do
+run (Config (m, cmd) fupdate subs) = do
+    (tmodel, subsink, cmdsink) <- atomically $ do
+        tmodel <- newTVar m
         subsink <- newEmptyTMVar
         cmdsink <- newTQueue
-        return (subsink, cmdsink)
+        return (tmodel, subsink, cmdsink)
+
+    let cfg = T.Config (tmodel, cmd) fupdate subs
 
     run2
         ( InternalState
