@@ -22,6 +22,7 @@ import Control.Concurrent.STM (TVar, TMVar, TQueue)
 
 import Network.KRPC.Types (Port, CompactInfo)
 
+
 data TCmd msg
     = CmdLog String
     | CmdGetRandom (Float -> msg)
@@ -32,7 +33,9 @@ data TCmd msg
     | CmdReadFile String (BS.ByteString -> msg)
     | CmdWriteFile String BS.ByteString
 
+
 newtype Cmd msg = Cmd [ TCmd msg ]
+
 
 data TSub msg
     = TCP Port (BS.ByteString -> msg)
@@ -40,13 +43,16 @@ data TSub msg
     | UDP Port (CompactInfo -> Received -> msg)
     | Timer Int (POSIXTime -> msg) -- timeout in milliseconds
 
+
 instance Hashable (TSub msg) where
     hashWithSalt s (TCP p _) = s `hashWithSalt` (0 :: Int) `hashWithSalt` p
     hashWithSalt s (TCPClient ci _ _) = s `hashWithSalt` (1 :: Int) `hashWithSalt` ci
     hashWithSalt s (UDP p _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` p
     hashWithSalt s (Timer t _) = s `hashWithSalt` (3 :: Int) `hashWithSalt` t
 
+
 newtype Sub msg = Sub [ TSub msg ]
+
 
 data Config model msg =
     Config
@@ -55,18 +61,16 @@ data Config model msg =
     , subscriptions :: model -> Sub msg
     }
 
+
 data Received = Received
     { bytes :: BS.ByteString
     , time  :: POSIXTime
     }
 
+
 data CmdQ
     = UDPQueue (TQueue (Port, CompactInfo, BS.ByteString))
     | TCPQueue (TQueue (CompactInfo, BS.ByteString))
-
-data FutureSubscription
-    = TCPClientSub { connectedSocket :: Socket }
-    | UDPSub { boundSocket :: Socket }
 
 
 data SubHandler msg
@@ -83,8 +87,8 @@ data SubHandler msg
 
 data InternalState msg = InternalState
     { readThreadS  :: Map Int (SubHandler msg, ThreadId)
-    , writeThreadS :: Map Int (CmdQ, ThreadId)
-    , cmdState     :: Map Int FutureSubscription
+    , writeThreadS :: TVar (Map Int (CmdQ, ThreadId))
+    , sockets      :: Map Int Socket
     , subSink      :: TMVar (Sub msg)
     , cmdSink      :: TQueue (TCmd msg)
     }

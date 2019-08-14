@@ -7,9 +7,11 @@ module Architecture.TEA
 
 import Prelude hiding (init)
 import qualified Data.Map as Map
+import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM
     ( STM
     , TVar
+    , TQueue
     , newTVar
     , newEmptyTMVar
     , newTQueue
@@ -65,52 +67,54 @@ foldMsgsStm up msgs tmodel = do
 
 
 runCmds
-    :: InternalState msg
+    :: Map.Map Int (T.CmdQ, ThreadId)
+    -> TQueue (T.TCmd msg)
     -> T.Config model msg
-    -> IO (T.Config model msg)
-runCmds self cfg =
-    do
-       (msgs) <- execCmd (writeThreadS self) (cmdSink self) cmd
+    -> IO ()
+runCmds writeS sink cfg = do
+    (msgs) <- execCmd writeS sink cmd
 
-       case msgs of
-           [] -> return cfg
-           _ -> atomically (foldMsgsStm (T.update cfg) msgs tmodel) >>=
-               \cmds -> runCmds self $ cfg { T.init = (tmodel, cmds) }
+    case msgs of
+       [] -> return ()
+       _ -> atomically (foldMsgsStm (T.update cfg) msgs tmodel) >>=
+           \cmds -> runCmds writeS sink $ cfg { T.init = (tmodel, cmds) }
 
     where
         (tmodel, cmd) = T.init cfg
 
 
 run2 :: InternalState msg -> T.Config model msg -> IO ()
-run2 self cfg =
-    do
-        newcfg <- runCmds self cfg
+run2 self cfg = do
+    writeS <- readTVarIO $ writeThreadS self
+    runCmds writeS (cmdSink self) cfg
 
-        model <- readTVarIO $ fst $ T.init newcfg
+    -- TODO: consider moving this inside of updateSubscriptions and removing
+    -- the Sub argument
+    --model <- readTVarIO $ fst $ T.init cfg
 
-        newself <-
-            updateSubscriptions
-                newcfg
-                self
-                ((T.subscriptions cfg) model)
+    newself <-
+        updateSubscriptions
+            cfg
+            self
 
-        return () -- Here we need to await subs or cmds
+    return () -- Here we need to await subs or cmds
 
 
 run :: Config model msg -> IO ()
 run (Config (m, cmd) fupdate subs) = do
-    (tmodel, subsink, cmdsink) <- atomically $ do
+    (tmodel, writeS, subsink, cmdsink) <- atomically $ do
         tmodel <- newTVar m
+        writeS <- newTVar Map.empty
         subsink <- newEmptyTMVar
         cmdsink <- newTQueue
-        return (tmodel, subsink, cmdsink)
+        return (tmodel, writeS, subsink, cmdsink)
 
     let cfg = T.Config (tmodel, cmd) fupdate subs
 
     run2
         ( InternalState
             Map.empty
-            Map.empty
+            writeS
             Map.empty
             subsink
             cmdsink

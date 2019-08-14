@@ -3,7 +3,6 @@ module Architecture.Internal.Cmd
     ) where
 
 import System.Random (randomIO)
-import Control.Monad (foldM)
 import Data.Hashable (hash)
 import Data.Maybe (catMaybes)
 import Data.Map (Map)
@@ -11,7 +10,6 @@ import qualified Data.Map as Map
 import qualified Data.ByteString as BS
 import Crypto.Random (newGenIO, genBytes)
 import Crypto.Random.DRBG (CtrDRBG)
-import Network.Socket.ByteString (sendTo, sendAll)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.IO (hFlush, stdout)
 import Control.Concurrent (ThreadId)
@@ -19,16 +17,10 @@ import Control.Concurrent.STM (atomically, TQueue, writeTQueue)
 
 import Network.KRPC.Types (CompactInfo (CompactInfo))
 import Architecture.Internal.Types
-    ( InternalState (..)
-    , Cmd (..)
+    ( Cmd (..)
     , TCmd (..)
     , TSub (..)
     , CmdQ (..)
-    )
-import Architecture.Internal.Sub
-    ( openUDPPort
-    , connectTCP
-    , ciToAddr
     )
 
 execTCmd

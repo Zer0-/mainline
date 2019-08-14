@@ -8,6 +8,7 @@ module Architecture.Internal.Sub
     , ciToAddr
     ) where
 
+import Prelude hiding (init)
 import Control.Monad (foldM)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -36,7 +37,7 @@ import Data.Hashable (hash)
 import qualified Data.ByteString as BS
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Control.Concurrent (forkIO, ThreadId)
-import Control.Concurrent.STM (TVar, newTVar, atomically)
+import Control.Concurrent.STM (TVar, newTVar, atomically, readTVarIO)
 
 import Architecture.Internal.Types
     ( InternalState (..)
@@ -60,45 +61,57 @@ udpTimeout :: Int
 udpTimeout = 10 * (((^) :: Int -> Int -> Int) 10 6)
 
 
--- Need config for:
---  - need the model to apply the subscription message to
---      (I think these are the meat of our app, ideally this forked thread performs it)
---  - ignore Cmd
---  - need update for the same op as #1
---  - subscriptions function is applied to the new model, and the Subs are
---      sent to the main thread to updateSubscriptions
-
+-- what happens if we subscribe first, then a command wants to send from that socket?
+-- the thread spawning the write thread for that socket will not have a place to
+-- get the existing socket from
 updateSubscriptions
     :: Config model msg
     -> InternalState msg
-    -> Sub msg
     -> IO (InternalState msg)
-updateSubscriptions cfg istate (Sub tsubs) = do
-    return istate
+updateSubscriptions cfg istate = do
+    model <- readTVarIO $ fst $ init cfg
+    let (Sub tsubs) = (subscriptions cfg) model
+
+    (newsocks, loaded) <- foldM fsub (Map.empty, Map.empty) (loads tsubs)
+    return istate { readThreadS = Map.union loaded (readThreadS istate) }
 
     where
-        loads =
-            filter (\(k, _) -> Map.notMember k (readThreadS istate)) tsubpairs
+        loads tsubs =
+            filter ( \(k, _)
+                    -> Map.notMember k (readThreadS istate)
+                   )
+                   (tsubpairs tsubs)
 
-        tsubpairs = zip tsubkeys tsubs
+        tsubpairs ts = [ ((hash t), t) | t <- ts ]
 
-        tsubkeys = map hash tsubs
+        fsub (s, m) (k, t) = subscribe cfg t
+            >>= (\(va, vb) -> return $ (Map.insert k va s, Map.insert k vb m))
 
 
+-- TODO:
+--  - have this return the created Socket ✓
+--  - pass the TVar'd writeThreadS to subscribe and to the main method of the thread
+--    so it can call runCmds on it.
+--  - same with subSink so we can pass the new Sub to the main thread
+--  - same with cmdSink, required by runCmds
+--  - before that we have to change runCmds to not have the entire InternalState
 subscribe
     :: Config model msg
     -> TSub msg
-    -> IO (SubHandler msg, ThreadId)
+    -> IO (Socket, (SubHandler msg, ThreadId))
 subscribe cfg (UDP p h) = do
     th <- atomically (newTVar h)
     sock <- openUDPPort p
     let tHandler = UDPHandler th
     threadId <- forkIO (runUDPSub cfg sock tHandler)
-    return (tHandler, threadId)
+    return (sock, (tHandler, threadId))
 
 
 runUDPSub :: Config model msg -> Socket -> SubHandler msg -> IO ()
 runUDPSub cfg sock tHandler = do
+    --(bs, sockAddr) <- recvFrom sock maxline
+    --now <- getPOSIXTime
+
     return ()
     --(bs, sockAddr) <- recvFrom boundSocket maxline
     -- we need the model and update function to apply our msg to
