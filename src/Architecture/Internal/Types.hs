@@ -38,14 +38,12 @@ newtype Cmd msg = Cmd [ TCmd msg ]
 
 
 data TSub msg
-    = TCP Port (BS.ByteString -> msg)
-    | TCPClient CompactInfo (BS.ByteString -> Int) (Received -> msg)
+    = TCPClient CompactInfo (BS.ByteString -> Int) (Received -> msg)
     | UDP Port (CompactInfo -> Received -> msg)
     | Timer Int (POSIXTime -> msg) -- timeout in milliseconds
 
 
 instance Hashable (TSub msg) where
-    hashWithSalt s (TCP p _) = s `hashWithSalt` (0 :: Int) `hashWithSalt` p
     hashWithSalt s (TCPClient ci _ _) = s `hashWithSalt` (1 :: Int) `hashWithSalt` ci
     hashWithSalt s (UDP p _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` p
     hashWithSalt s (Timer t _) = s `hashWithSalt` (3 :: Int) `hashWithSalt` t
@@ -74,8 +72,7 @@ data CmdQ
 
 
 data SubHandler msg
-    = TCPHandler (TVar (BS.ByteString -> msg))
-    | TCPClientHandler
+    = TCPClientHandler
         ( TVar
             ( BS.ByteString -> Int -- getMore
             , Received -> msg --handler

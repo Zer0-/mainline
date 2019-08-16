@@ -18,6 +18,7 @@ import Prelude hiding (log, print, readFile, writeFile)
 import Data.List (intercalate)
 import Data.ByteString (ByteString)
 import Data.Time.Clock.POSIX (POSIXTime)
+import Architecture.Internal.Cmd (batch) -- for export only
 
 import Network.KRPC.Types
     ( Port
@@ -42,9 +43,6 @@ randomBytes n f = Cmd [ CmdRandomBytes n f ]
 
 none :: Cmd msg
 none = Cmd []
-
-batch :: [ Cmd msg ] -> Cmd msg
-batch cmds = Cmd $ concat [t | (Cmd t) <- cmds]
 
 sendUDP :: Port -> CompactInfo -> ByteString -> Cmd msg
 sendUDP p dest bs = Cmd [ CmdSendUDP p dest bs ]

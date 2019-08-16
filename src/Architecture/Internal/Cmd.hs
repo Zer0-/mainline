@@ -1,7 +1,9 @@
 module Architecture.Internal.Cmd
-    ( execCmd
+    ( runCmds
+    , batch
     ) where
 
+import Prelude hiding (init)
 import System.Random (randomIO)
 import Data.Hashable (hash)
 import Data.Maybe (catMaybes)
@@ -13,7 +15,15 @@ import Crypto.Random.DRBG (CtrDRBG)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.IO (hFlush, stdout)
 import Control.Concurrent (ThreadId)
-import Control.Concurrent.STM (atomically, TQueue, writeTQueue)
+import Control.Concurrent.STM
+    ( atomically
+    , TQueue
+    , TVar
+    , STM
+    , writeTQueue
+    , readTVar
+    , writeTVar
+    )
 
 import Network.KRPC.Types (CompactInfo (CompactInfo))
 import Architecture.Internal.Types
@@ -21,6 +31,7 @@ import Architecture.Internal.Types
     , TCmd (..)
     , TSub (..)
     , CmdQ (..)
+    , Config (..)
     )
 
 execTCmd
@@ -84,6 +95,23 @@ execCmd
 execCmd wrT sink (Cmd l) = (mapM (execTCmd wrT sink) l) >>= (return . catMaybes)
 
 
+runCmds
+    :: Map.Map Int (CmdQ, ThreadId)
+    -> TQueue (TCmd msg)
+    -> Config model msg
+    -> IO ()
+runCmds writeS sink cfg = do
+    (msgs) <- execCmd writeS sink cmd
+
+    case msgs of
+       [] -> return ()
+       _ -> atomically (foldMsgsStm (update cfg) msgs tmodel) >>=
+           \cmds -> runCmds writeS sink $ cfg { init = (tmodel, cmds) }
+
+    where
+        (tmodel, cmd) = init cfg
+
+
 sendNetTCmd
     :: Map Int (CmdQ, ThreadId)
     -> TQueue (TCmd msg)
@@ -106,3 +134,31 @@ enqueueCmd (TCPQueue q) (CmdSendTCP ci bs) =
     atomically (writeTQueue q (ci, bs))
 
 enqueueCmd _ _ = undefined
+
+foldMsgs
+    :: (msg -> model -> (model, Cmd msg))
+    -> [ msg ]
+    -> model
+    -> (model, Cmd msg)
+foldMsgs _ [] mdl = (mdl, Cmd [])
+foldMsgs f (x:xs) mdl = cmd2 `merge` foldMsgs f xs mdl2
+    where
+        (mdl2, cmd2) = f x mdl
+
+
+foldMsgsStm
+    :: (msg -> model -> (model, Cmd msg))
+    -> [ msg ]
+    -> TVar model
+    -> STM (Cmd msg)
+foldMsgsStm up msgs tmodel = do
+    model <- readTVar tmodel
+    let (model2, cmds) = foldMsgs up msgs model
+    writeTVar tmodel model2
+    return cmds
+
+merge :: Cmd msg -> (model, Cmd msg) -> (model, Cmd msg)
+merge c1 (m, c2) = (m, batch [c1, c2])
+
+batch :: [ Cmd msg ] -> Cmd msg
+batch cmds = Cmd $ concat [t | (Cmd t) <- cmds]

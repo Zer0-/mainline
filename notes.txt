@@ -19,17 +19,6 @@ Mainline/Scripts/SendUDPHello.hs to a common Runnables directory with App?
 Then we have Network.{Mainline, KRPC, Bittorrent}
 - but we still have all of the actual network calls under Architecture
 
-
-Priority
---------
-
-  Mainline
-    - Timed cleanup routines for Mainline
-    - Initiate GetPeers
-
-  Peer Protocol
-    - would greatly benefit from concurrency
-
 Misc
 ----
   - in a lib we depend on, BEncode instance for InfoDict encodes the dict it

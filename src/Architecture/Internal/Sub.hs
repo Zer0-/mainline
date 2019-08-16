@@ -9,9 +9,9 @@ module Architecture.Internal.Sub
     ) where
 
 import Prelude hiding (init)
-import Control.Monad (foldM)
+import Control.Monad (foldM, forever)
 import qualified Data.Map as Map
-import qualified Data.Set as Set
+import qualified Data.ByteString as BS
 import Network.Socket
     ( Socket
     , socket
@@ -27,26 +27,35 @@ import Network.Socket
     , listen
     , connect
     , close
-    , accept
+    --, accept
     , hostAddressToTuple
     , tupleToHostAddress
     )
 import Network.Socket.ByteString (recv, recvFrom)
-import System.Timeout (timeout)
+--import System.Timeout (timeout)
 import Data.Hashable (hash)
-import qualified Data.ByteString as BS
-import Data.Time.Clock.POSIX (getPOSIXTime)
-import Control.Concurrent (forkIO, ThreadId)
-import Control.Concurrent.STM (TVar, newTVar, atomically, readTVarIO)
+import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
+import Control.Concurrent (forkIO, ThreadId, threadDelay)
+import Control.Concurrent.STM
+    ( TVar
+    , newTVar
+    , atomically
+    , readTVarIO
+    , readTVar
+    , writeTVar
+    , putTMVar
+    )
 
 import Architecture.Internal.Types
     ( InternalState (..)
     , Config (..)
     , Received (..)
     , TSub (..)
+    , Cmd
     , SubHandler (..)
     , Sub (..)
     )
+import Architecture.Internal.Cmd (runCmds)
 import Network.Octets (octets)
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
 import Network.Octets (fromOctets)
@@ -57,13 +66,11 @@ maxline :: Int
 maxline = 1472 -- 1500 MTU - 20 byte IPv4 header - 8 byte UDP header
 
 --In μs
+{-
 udpTimeout :: Int
 udpTimeout = 10 * (((^) :: Int -> Int -> Int) 10 6)
+-}
 
-
--- what happens if we subscribe first, then a command wants to send from that socket?
--- the thread spawning the write thread for that socket will not have a place to
--- get the existing socket from
 updateSubscriptions
     :: Config model msg
     -> InternalState msg
@@ -73,59 +80,173 @@ updateSubscriptions cfg istate = do
     let (Sub tsubs) = (subscriptions cfg) model
 
     (newsocks, loaded) <- foldM fsub (Map.empty, Map.empty) (loads tsubs)
-    return istate { readThreadS = Map.union loaded (readThreadS istate) }
+    return istate
+        { readThreadS = Map.union loaded (readThreadS istate)
+        , sockets = newsocks
+        }
 
     where
-        loads tsubs =
-            filter ( \(k, _)
-                    -> Map.notMember k (readThreadS istate)
-                   )
-                   (tsubpairs tsubs)
+        loads =
+            ( filter (\(k, _) -> Map.notMember k (readThreadS istate))
+            ) . tsubpairs
 
-        tsubpairs ts = [ ((hash t), t) | t <- ts ]
+        tsubpairs ts = [ (hash t, t) | t <- ts ]
 
-        fsub (s, m) (k, t) = subscribe cfg t
-            >>= (\(va, vb) -> return $ (Map.insert k va s, Map.insert k vb m))
+        fsub (openSocks, readS) (key, tsub) =
+            subscribe
+                cfg
+                istate
+                ( case tsub of
+                    (Timer _ _) -> Nothing
+                    _ -> Map.lookup key (sockets istate)
+                )
+                tsub
+            >>= ( \(msock, threadinfo) -> return $
+                    ( maybe openSocks (\s -> Map.insert key s openSocks) msock
+                    , Map.insert key threadinfo readS
+                    )
+                )
 
 
--- TODO:
---  - have this return the created Socket ✓
---  - pass the TVar'd writeThreadS to subscribe and to the main method of the thread
---    so it can call runCmds on it.
---  - same with subSink so we can pass the new Sub to the main thread
---  - same with cmdSink, required by runCmds
---  - before that we have to change runCmds to not have the entire InternalState
 subscribe
     :: Config model msg
+    -> InternalState msg
+    -> Maybe Socket
     -> TSub msg
-    -> IO (Socket, (SubHandler msg, ThreadId))
-subscribe cfg (UDP p h) = do
+    -> IO (Maybe Socket, (SubHandler msg, ThreadId))
+subscribe cfg istate msocket (UDP p h) = do
     th <- atomically (newTVar h)
-    sock <- openUDPPort p
-    let tHandler = UDPHandler th
-    threadId <- forkIO (runUDPSub cfg sock tHandler)
-    return (sock, (tHandler, threadId))
+    sock <- getsock
+    threadId <- forkIO (runUDPSub cfg istate sock th)
+    return (Just sock, (UDPHandler th, threadId))
+
+    where
+        getsock = case msocket of
+            Just s -> return s
+            Nothing -> openUDPPort p
+
+subscribe cfg istate msocket (TCPClient ci getMore h) = do
+    th <- atomically (newTVar (getMore, h))
+    sock <- getsock
+    threadId <- forkIO $ runTCPClientSub cfg istate sock th
+    return (Just sock, (TCPClientHandler th, threadId))
+
+    where
+        getsock = case msocket of
+            Just s -> return s
+            Nothing -> connectTCP ci
+
+subscribe cfg istate _ (Timer ms h) = do
+    th <- atomically (newTVar h)
+    threadId <- forkIO $ runTimerSub cfg istate ms th
+    return (Nothing, (TimerHandler th, threadId))
 
 
-runUDPSub :: Config model msg -> Socket -> SubHandler msg -> IO ()
-runUDPSub cfg sock tHandler = do
-    --(bs, sockAddr) <- recvFrom sock maxline
-    --now <- getPOSIXTime
 
-    return ()
-    --(bs, sockAddr) <- recvFrom boundSocket maxline
-    -- we need the model and update function to apply our msg to
-    -- - atomically:
-    --   - get model
-    --   - get handler
-    --   - apply handler to bytes, getting message
-    --   - apply message to model via update function to get Cmd
-    --   - write model
-    --
-    -- - runCmds on the Cmd
-    -- - get model
-    -- - write Sub generated by subscription
-    -- - runUDPSub
+runTCPClientSub
+    :: Config model msg
+    -> InternalState msg
+    -> Socket
+    -> TVar (BS.ByteString -> Int, Received -> msg)
+    -> IO ()
+runTCPClientSub cfg istate sock tfns = forever $ do
+    (getMore, th) <- readTVarIO tfns
+    bytes <- more sock getMore BS.empty
+    now <- getPOSIXTime
+
+    cmd <- atomically $ do
+        model <- readTVar tmodel
+
+        let (model2, cmd) = (update cfg) (th (Received bytes now)) model
+
+        writeTVar tmodel model2
+        return cmd
+
+    handleCmd cfg istate cmd
+
+    where
+        tmodel = fst (init cfg)
+
+        more s f msg =
+            let n = f msg in
+            if n < 1 then return msg
+            else do
+                bs <- recv s n
+                more s f (msg <> bs)
+
+
+runUDPSub
+    :: Config model msg
+    -> InternalState msg
+    -> Socket
+    -> TVar (CompactInfo -> Received -> msg)
+    -> IO ()
+runUDPSub cfg istate sock tHandler = forever $ do
+    (bs, sockAddr) <- recvFrom sock maxline
+    now <- getPOSIXTime
+
+    cmd <- atomically $ do
+        model <- readTVar tmodel
+        th <- readTVar tHandler
+
+        let (model2, cmd) =
+                        (update cfg)
+                            (th (addrToCi sockAddr) (Received bs now))
+                            model
+
+        writeTVar tmodel model2
+        return cmd
+
+    handleCmd cfg istate cmd
+
+    where
+        tmodel = fst (init cfg)
+
+
+runTimerSub
+    :: Config model msg
+    -> InternalState msg
+    -> Int
+    -> TVar (POSIXTime -> msg)
+    -> IO ()
+runTimerSub cfg istate ms tHandler = forever $ do
+    threadDelay (1000 * ms)
+    now <- getPOSIXTime
+
+    cmd <- atomically $ do
+        model <- readTVar tmodel
+        th <- readTVar tHandler
+
+        let (model2, cmd) = (update cfg) (th now) model
+
+        writeTVar tmodel model2
+        return cmd
+
+    handleCmd cfg istate cmd
+
+    where
+        tmodel = fst (init cfg)
+
+
+handleCmd
+    :: Config model msg
+    -> InternalState msg
+    -> Cmd msg
+    -> IO ()
+handleCmd cfg istate cmd = do
+    writeS <- readTVarIO $ writeThreadS istate
+
+    runCmds
+        writeS
+        (cmdSink istate)
+        cfg { init = (tmodel, cmd) }
+
+    atomically $ do
+        model <- readTVar tmodel
+        putTMVar (subSink istate) ((subscriptions cfg) model)
+
+    where
+        tmodel = fst (init cfg)
 
 
 bindSocket :: SocketType -> Port -> IO Socket
