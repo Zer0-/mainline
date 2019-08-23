@@ -12,7 +12,6 @@ import qualified Data.ByteString as BS
 import Data.Serialize (encode, decode)
 import Data.Default (def)
 import Data.Maybe (fromJust)
-import Data.List (sortOn)
 
 import qualified Data.BEncode as B
 import qualified Network.BitTorrent.Exchange.Message as BT
@@ -244,7 +243,7 @@ chooseNextBlk lastBlkRequested nblks haveblks =
         nxt = lastBlkRequested + 1
 
 combineBlocks :: Map Int ByteString -> ByteString
-combineBlocks blks = BS.concat $ map snd (sortOn fst (Map.assocs blks))
+combineBlocks = BS.concat . Map.elems
 
 pieceReq :: Word8 -> Int -> CompactInfo -> Cmd Msg
 pieceReq msgid i ci =

@@ -8,10 +8,13 @@ module Architecture.TEA
 import qualified Data.Map as Map
 import Control.Concurrent.STM
     ( newTVar
-    , newEmptyTMVar
-    , newTQueue
     , readTVarIO
+    , newEmptyTMVar
+    , takeTMVar
+    , newTQueue
+    , readTQueue
     , atomically
+    , orElse
     )
 
 import Architecture.Internal.Cmd (runCmds)
@@ -31,17 +34,35 @@ data Config model msg =
         (model -> Sub msg)
 
 
+loop :: InternalState msg -> T.Config model msg -> IO ()
+loop self cfg = do
+    thing <- atomically $ lexpr `orElse` rexpr
+
+    newself <- case thing of
+        (Left tcmd) -> undefined
+        (Right sub) -> updateSubscriptions sub cfg self
+
+    loop newself cfg
+
+    where
+        lexpr = readTQueue (cmdSink self) >>= return . Left
+        rexpr = takeTMVar (subSink self) >>= return . Right
+
+
 run2 :: InternalState msg -> T.Config model msg -> IO ()
 run2 self cfg = do
     writeS <- readTVarIO $ writeThreadS self
     runCmds writeS (cmdSink self) cfg
 
+    model <- readTVarIO $ fst $ T.init cfg
+
     newself <-
         updateSubscriptions
+            ((T.subscriptions cfg) model)
             cfg
             self
 
-    return () -- Here we need to await subs or cmds
+    loop newself cfg
 
 
 run :: Config model msg -> IO ()

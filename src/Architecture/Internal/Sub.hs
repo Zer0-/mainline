@@ -3,7 +3,6 @@
 module Architecture.Internal.Sub
     ( Received (..)
     , updateSubscriptions
-    , openUDPPort
     , connectTCP
     , ciToAddr
     ) where
@@ -24,10 +23,9 @@ import Network.Socket
     , defaultHints
     , getAddrInfo
     , bind
-    , listen
+    --, listen
     , connect
     , close
-    --, accept
     , hostAddressToTuple
     , tupleToHostAddress
     )
@@ -56,6 +54,7 @@ import Architecture.Internal.Types
     , Sub (..)
     )
 import Architecture.Internal.Cmd (runCmds)
+import Architecture.Internal.Network (openUDPPort, ciToAddr, addrToCi)
 import Network.Octets (octets)
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
 import Network.Octets (fromOctets)
@@ -72,14 +71,13 @@ udpTimeout = 10 * (((^) :: Int -> Int -> Int) 10 6)
 -}
 
 updateSubscriptions
-    :: Config model msg
+    :: Sub msg
+    -> Config model msg
     -> InternalState msg
     -> IO (InternalState msg)
-updateSubscriptions cfg istate = do
-    model <- readTVarIO $ fst $ init cfg
-    let (Sub tsubs) = (subscriptions cfg) model
-
+updateSubscriptions (Sub tsubs) cfg istate = do
     (newsocks, loaded) <- foldM fsub (Map.empty, Map.empty) (loads tsubs)
+
     return istate
         { readThreadS = Map.union loaded (readThreadS istate)
         , sockets = newsocks
@@ -249,28 +247,12 @@ handleCmd cfg istate cmd = do
         tmodel = fst (init cfg)
 
 
-bindSocket :: SocketType -> Port -> IO Socket
-bindSocket t p = do
-    addr:_ <- getAddrInfo (Just hints) Nothing (Just $ show p)
-    sock <- socket AF_INET t defaultProtocol
-    bind sock (addrAddress addr)
-    return sock
-
-    where
-        hints :: AddrInfo
-        hints = defaultHints
-            { addrFlags = [AI_PASSIVE]
-            , addrFamily = AF_INET
-            , addrSocketType = t
-            }
-
-
--- Used by servers
-openTCPPort :: Port -> IO Socket
-openTCPPort p = do
-    sock <- bindSocket Stream p
-    listen sock 5
-    return sock
+-- Used by servers (Sub to serve on TCP removed atm)
+--openTCPPort :: Port -> IO Socket
+--openTCPPort p = do
+--    sock <- bindSocket Stream p
+--    listen sock 5
+--    return sock
 
 
 -- Used by clients
@@ -281,28 +263,5 @@ connectTCP ci = do
     return sock
 
 
-openUDPPort :: Port -> IO Socket
-openUDPPort = bindSocket Datagram
-
-
 closem :: Maybe Socket -> IO ()
 closem = maybe (return ()) close
-
-
-addrToCi :: SockAddr -> CompactInfo
-addrToCi (SockAddrInet port host) =
-    CompactInfo
-        (fromOctets
-            $ (\(a1, a2, a3, a4) -> [a1, a2, a3, a4])
-            $ hostAddressToTuple host)
-        (fromIntegral port)
-
-addrToCi _ = undefined
-
-ciToAddr :: CompactInfo -> SockAddr
-ciToAddr (CompactInfo ip p) = SockAddrInet
-    (fromIntegral p)
-    (tupleToHostAddress
-        $ (\[a1, a2, a3, a4] -> (a1, a2, a3, a4))
-        $ octets ip)
-

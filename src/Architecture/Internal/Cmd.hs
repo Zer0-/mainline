@@ -4,6 +4,7 @@ module Architecture.Internal.Cmd
     ) where
 
 import Prelude hiding (init)
+import Control.Monad (forever)
 import System.Random (randomIO)
 import Data.Hashable (hash)
 import Data.Maybe (catMaybes)
@@ -12,26 +13,34 @@ import qualified Data.Map as Map
 import qualified Data.ByteString as BS
 import Crypto.Random (newGenIO, genBytes)
 import Crypto.Random.DRBG (CtrDRBG)
+import Network.Socket (Socket)
+import Network.Socket.ByteString (sendTo)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.IO (hFlush, stdout)
-import Control.Concurrent (ThreadId)
+import Control.Concurrent (ThreadId, forkIO)
 import Control.Concurrent.STM
     ( atomically
     , TQueue
     , TVar
     , STM
+    , newTQueue
     , writeTQueue
+    , readTQueue
     , readTVar
+    , readTVarIO
     , writeTVar
+    , modifyTVar
     )
 
 import Network.KRPC.Types (CompactInfo (CompactInfo))
+import Architecture.Internal.Network (openUDPPort, ciToAddr)
 import Architecture.Internal.Types
     ( Cmd (..)
     , TCmd (..)
     , TSub (..)
     , CmdQ (..)
     , Config (..)
+    , InternalState (..)
     )
 
 execTCmd
@@ -76,12 +85,12 @@ execTCmd _ _ (CmdSendUDP _ (CompactInfo ip 0) _) =
         msg = "Error: Cannot send message to " ++ show (CompactInfo ip 0)
             ++ ". Invalid port 0!"
 
-execTCmd wrT sink (CmdSendUDP srcPort dest bs) = sendNetTCmd wrT sink cmd key
+execTCmd wrT sink (CmdSendUDP srcPort dest bs) = sinkNetTCmd wrT sink cmd key
     where
         key = hash (UDP srcPort undefined)
         cmd = CmdSendUDP srcPort dest bs
 
-execTCmd wrT sink (CmdSendTCP ci bs) = sendNetTCmd wrT sink cmd key
+execTCmd wrT sink (CmdSendTCP ci bs) = sinkNetTCmd wrT sink cmd key
     where
         key = hash (TCPClient ci undefined undefined)
         cmd = (CmdSendTCP ci bs)
@@ -112,28 +121,82 @@ runCmds writeS sink cfg = do
         (tmodel, cmd) = init cfg
 
 
-sendNetTCmd
+-- TODO: TCP case
+updateWriters
+    :: TCmd msg
+    -> InternalState msg
+    -> IO (InternalState msg)
+updateWriters (CmdSendUDP srcPort ci bs) istate = do
+    writers <- readTVarIO (writeThreadS istate)
+
+    case Map.lookup key writers of
+        (Just (cmdq, _)) -> enqueueCmd cmdq (ci, bs) >> return istate
+        Nothing -> do
+            (sock, istate2) <- case Map.lookup key (sockets istate) of
+                (Just sock) -> return (sock, istate)
+                Nothing -> do
+                    sock <- openUDPPort srcPort
+                    return
+                        ( sock
+                        , istate { sockets = Map.insert key sock (sockets istate)
+                            }
+                        )
+
+            newq <- atomically $ do
+                q <- newTQueue
+                writeTQueue q (ci, bs)
+                return q
+
+            threadId <- forkIO (writeUDPMain newq sock)
+
+            atomically $ modifyTVar
+                (writeThreadS istate2)
+                (Map.insert key (newq, threadId))
+
+            return istate2
+
+    where
+        key = hash (UDP srcPort undefined)
+
+
+writeUDPMain :: CmdQ -> Socket -> IO ()
+writeUDPMain q sock = forever $ do
+    (ci, bs) <- atomically $ readTQueue q
+    _ <- sendTo sock bs (ciToAddr ci)
+    return ()
+
+--type?
+--description:
+--  take a TCmd
+--  if it's one of the ones that use sockets
+--      - try to get an open socket (from internal state) or create one
+--          - if we created one store it in internal state
+--      - create a new write thread for it with a new non-empty queue
+--      - shove queue into internal state
+--      - return new internal state
+
+
+sinkNetTCmd
     :: Map Int (CmdQ, ThreadId)
     -> TQueue (TCmd msg)
     -> TCmd msg
     -> Int
     -> IO (Maybe msg)
-sendNetTCmd wrT sink cmd key = do
+sinkNetTCmd wrT sink cmd key = do
     case Map.lookup key wrT of
-        (Just (cmdq, _)) -> enqueueCmd cmdq cmd
+        (Just (cmdq, _)) -> enqueueCmd cmdq (cmdToCmdQVal cmd)
         Nothing -> atomically $ writeTQueue sink cmd
 
     return Nothing
 
 
-enqueueCmd :: CmdQ -> TCmd msg -> IO ()
-enqueueCmd (UDPQueue q) (CmdSendUDP p ci bs) =
-    atomically (writeTQueue q (p, ci, bs))
+enqueueCmd :: CmdQ -> (CompactInfo, BS.ByteString) -> IO ()
+enqueueCmd q x = atomically (writeTQueue q x)
 
-enqueueCmd (TCPQueue q) (CmdSendTCP ci bs) =
-    atomically (writeTQueue q (ci, bs))
-
-enqueueCmd _ _ = undefined
+cmdToCmdQVal :: TCmd msg -> (CompactInfo, BS.ByteString)
+cmdToCmdQVal (CmdSendUDP _ ci bs) = (ci, bs)
+cmdToCmdQVal (CmdSendTCP ci bs)   = (ci, bs)
+cmdToCmdQVal _                    = undefined
 
 foldMsgs
     :: (msg -> model -> (model, Cmd msg))
