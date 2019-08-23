@@ -1,5 +1,6 @@
 module Architecture.Internal.Network
     ( openUDPPort
+    , connectTCP
     , addrToCi
     , ciToAddr
     ) where
@@ -61,3 +62,18 @@ ciToAddr (CompactInfo ip p) = SockAddrInet
         $ (\[a1, a2, a3, a4] -> (a1, a2, a3, a4))
         $ octets ip)
 
+
+-- Used by servers (Sub to serve on TCP removed atm)
+--openTCPPort :: Port -> IO Socket
+--openTCPPort p = do
+--    sock <- bindSocket Stream p
+--    listen sock 5
+--    return sock
+
+
+-- Used by clients
+connectTCP :: CompactInfo -> IO Socket
+connectTCP ci = do
+    sock <- socket AF_INET Stream defaultProtocol
+    connect sock (ciToAddr ci)
+    return sock

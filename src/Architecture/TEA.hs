@@ -17,7 +17,7 @@ import Control.Concurrent.STM
     , orElse
     )
 
-import Architecture.Internal.Cmd (runCmds)
+import Architecture.Internal.Cmd (runCmds, updateWriters)
 import Architecture.Internal.Types
     ( InternalState (..)
     , Cmd (..)
@@ -39,7 +39,7 @@ loop self cfg = do
     thing <- atomically $ lexpr `orElse` rexpr
 
     newself <- case thing of
-        (Left tcmd) -> undefined
+        (Left tcmd) -> updateWriters tcmd self
         (Right sub) -> updateSubscriptions sub cfg self
 
     loop newself cfg

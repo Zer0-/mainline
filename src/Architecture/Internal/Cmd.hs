@@ -1,6 +1,7 @@
 module Architecture.Internal.Cmd
     ( runCmds
     , batch
+    , updateWriters
     ) where
 
 import Prelude hiding (init)
@@ -38,7 +39,7 @@ import Architecture.Internal.Types
     ( Cmd (..)
     , TCmd (..)
     , TSub (..)
-    , CmdQ (..)
+    , CmdQ
     , Config (..)
     , InternalState (..)
     )
@@ -113,9 +114,10 @@ runCmds writeS sink cfg = do
     (msgs) <- execCmd writeS sink cmd
 
     case msgs of
-       [] -> return ()
-       _ -> atomically (foldMsgsStm (update cfg) msgs tmodel) >>=
-           \cmds -> runCmds writeS sink $ cfg { init = (tmodel, cmds) }
+        [] -> return ()
+        _ -> do
+            cmds <- atomically $ foldMsgsStm (update cfg) msgs tmodel
+            runCmds writeS sink (cfg { init = (tmodel, cmds) })
 
     where
         (tmodel, cmd) = init cfg
@@ -138,7 +140,8 @@ updateWriters (CmdSendUDP srcPort ci bs) istate = do
                     sock <- openUDPPort srcPort
                     return
                         ( sock
-                        , istate { sockets = Map.insert key sock (sockets istate)
+                        , istate
+                            { sockets = Map.insert key sock (sockets istate)
                             }
                         )
 
@@ -164,16 +167,6 @@ writeUDPMain q sock = forever $ do
     (ci, bs) <- atomically $ readTQueue q
     _ <- sendTo sock bs (ciToAddr ci)
     return ()
-
---type?
---description:
---  take a TCmd
---  if it's one of the ones that use sockets
---      - try to get an open socket (from internal state) or create one
---          - if we created one store it in internal state
---      - create a new write thread for it with a new non-empty queue
---      - shove queue into internal state
---      - return new internal state
 
 
 sinkNetTCmd
@@ -207,7 +200,6 @@ foldMsgs _ [] mdl = (mdl, Cmd [])
 foldMsgs f (x:xs) mdl = cmd2 `merge` foldMsgs f xs mdl2
     where
         (mdl2, cmd2) = f x mdl
-
 
 foldMsgsStm
     :: (msg -> model -> (model, Cmd msg))

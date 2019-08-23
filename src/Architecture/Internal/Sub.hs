@@ -11,24 +11,7 @@ import Prelude hiding (init)
 import Control.Monad (foldM, forever)
 import qualified Data.Map as Map
 import qualified Data.ByteString as BS
-import Network.Socket
-    ( Socket
-    , socket
-    , SocketType (Stream, Datagram)
-    , SockAddr (..)
-    , Family (AF_INET)
-    , AddrInfo (addrFlags, addrFamily, addrSocketType, addrAddress)
-    , AddrInfoFlag (AI_PASSIVE)
-    , defaultProtocol
-    , defaultHints
-    , getAddrInfo
-    , bind
-    --, listen
-    , connect
-    , close
-    , hostAddressToTuple
-    , tupleToHostAddress
-    )
+import Network.Socket (Socket)
 import Network.Socket.ByteString (recv, recvFrom)
 --import System.Timeout (timeout)
 import Data.Hashable (hash)
@@ -44,6 +27,7 @@ import Control.Concurrent.STM
     , putTMVar
     )
 
+import Network.KRPC.Types (CompactInfo)
 import Architecture.Internal.Types
     ( InternalState (..)
     , Config (..)
@@ -54,10 +38,12 @@ import Architecture.Internal.Types
     , Sub (..)
     )
 import Architecture.Internal.Cmd (runCmds)
-import Architecture.Internal.Network (openUDPPort, ciToAddr, addrToCi)
-import Network.Octets (octets)
-import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
-import Network.Octets (fromOctets)
+import Architecture.Internal.Network
+    ( openUDPPort
+    , connectTCP
+    , ciToAddr
+    , addrToCi
+    )
 
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
@@ -245,23 +231,3 @@ handleCmd cfg istate cmd = do
 
     where
         tmodel = fst (init cfg)
-
-
--- Used by servers (Sub to serve on TCP removed atm)
---openTCPPort :: Port -> IO Socket
---openTCPPort p = do
---    sock <- bindSocket Stream p
---    listen sock 5
---    return sock
-
-
--- Used by clients
-connectTCP :: CompactInfo -> IO Socket
-connectTCP ci = do
-    sock <- socket AF_INET Stream defaultProtocol
-    connect sock (ciToAddr ci)
-    return sock
-
-
-closem :: Maybe Socket -> IO ()
-closem = maybe (return ()) close
