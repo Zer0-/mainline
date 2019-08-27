@@ -7,7 +7,7 @@ module Architecture.Internal.Types
     , TSub (..)
     , Sub (..)
     , Config (..)
-    , CmdQ
+    , CmdQ (..)
     ) where
 
 import Data.Map (Map)
@@ -66,7 +66,8 @@ data Received = Received
     }
 
 
-type CmdQ = TQueue (CompactInfo, BS.ByteString)
+data CmdQ = UDPQueue (TQueue (CompactInfo, BS.ByteString))
+          | TCPQueue (TQueue BS.ByteString)
 
 data SubHandler msg
     = TCPClientHandler

@@ -19,7 +19,6 @@ import Network.Socket
     , bind
     --, listen
     , connect
-    , close
     , hostAddressToTuple
     , tupleToHostAddress
     )
