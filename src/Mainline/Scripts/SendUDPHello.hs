@@ -27,7 +27,7 @@ update _ _ = (undefined, Cmd.none)
 config :: Config a b
 config = Config (undefined, cmd) update (\_ -> Sub.none)
     where
-        cmd  =
+        cmd =
             Cmd.sendUDP
                 servePort
                 seedNodeInfo

@@ -196,6 +196,14 @@ update
                 Cmd.DEBUG
                 [ "Ignoring Available response from server" ]
 
+update (GotHandshake have) _ = (Off, logmsg)
+    where
+        logmsg = Cmd.log
+            Cmd.INFO
+            [ "Got unknown response from server:"
+            , show have
+            ]
+
 update _ Off = (Off, Cmd.none)
 
 
@@ -228,7 +236,7 @@ subscriptions _ = Sub.readTCP knownNodeInfo numToRead (Got . decode . bytes)
 numBlks :: Int -> Int
 numBlks size =
     ceiling
-    (((fromIntegral size) / (fromIntegral metadataBlocksize)) :: Float)
+    ((fromIntegral size / fromIntegral metadataBlocksize) :: Float)
 
 chooseNextBlk :: Int -> Int -> Map Int a -> Maybe Int
 chooseNextBlk lastBlkRequested nblks haveblks =

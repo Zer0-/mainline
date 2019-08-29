@@ -148,7 +148,7 @@ executable SendUDPHello
                    Network.KRPC.Types
                    Network.Octets
   hs-source-dirs:   src
-  ghc-options:      -Wall -rtsopts
+  ghc-options:      -Wall -rtsopts -O2 -threaded -fllvm
   default-language: Haskell2010
   main-is:          Mainline/Scripts/SendUDPHello.hs
 
@@ -179,10 +179,10 @@ executable Teatime
                    Network.Octets
                    Network.KRPC.Types
                    Network.KRPC.Helpers
-  hs-source-dirs:  src
-  ghc-options:     -Wall -rtsopts
+  hs-source-dirs:   src
+  ghc-options:      -Wall -rtsopts -O2 -threaded -fllvm
   default-language: Haskell2010
-  main-is:         Architecture/Hello.hs
+  main-is:          Architecture/Hello.hs
 
 executable ResolveMagnet
   build-depends:

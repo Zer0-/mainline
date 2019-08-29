@@ -115,7 +115,6 @@ runCmds writeS sink cfg = do
         (tmodel, cmd) = init cfg
 
 
--- TODO: TCP case
 updateWriters
     :: TCmd msg
     -> InternalState msg
