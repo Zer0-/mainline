@@ -11,13 +11,14 @@ import Prelude hiding (init)
 import Control.Monad (foldM, forever)
 import Data.Foldable (sequence_)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Data.ByteString as BS
-import Network.Socket (Socket)
+import Network.Socket (Socket, close)
 import Network.Socket.ByteString (recv, recvFrom)
 --import System.Timeout (timeout)
 import Data.Hashable (hash)
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
-import Control.Concurrent (forkIO, ThreadId, threadDelay)
+import Control.Concurrent (forkIO, ThreadId, threadDelay, killThread)
 import Control.Concurrent.STM
     ( STM
     , TVar
@@ -64,22 +65,37 @@ updateSubscriptions
     -> InternalState msg
     -> IO (InternalState msg)
 updateSubscriptions (Sub tsubs) cfg istate = do
-    atomically $ updateHandlers (readThreadS istate) tsubpairs
+    writeS <- atomically $ do
+        updateHandlers currentReads tsubpairs
+        readTVar (writeThreadS istate)
 
     (newsocks, loaded) <- foldM fsub (Map.empty, Map.empty) loads
 
+    mapM_ killThread (Map.map snd unloads)
+
+    let toClose = fullClosed writeS
+
+    mapM_ close ((sockets istate) `Map.restrictKeys` toClose)
+
     return istate
-        { readThreadS = Map.union loaded (readThreadS istate)
-        , sockets = newsocks
+        { readThreadS = Map.union loaded (currentReads `Map.difference` unloads)
+        , sockets =
+            newsocks `Map.union` ((sockets istate) `Map.withoutKeys` toClose)
         }
 
     where
         loads =
-            ( filter (\(k, _) -> Map.notMember k (readThreadS istate))
+            ( filter (\(k, _) -> Map.notMember k currentReads)
             ) tsubpairs
+
+        unloads =
+            currentReads `Map.withoutKeys` (Set.fromList (map fst tsubpairs))
+
+        fullClosed writeS = (Map.keysSet unloads) `Set.difference` (Map.keysSet writeS)
 
         tsubpairs = [ (hash t, t) | t <- tsubs ]
 
+        currentReads = readThreadS istate
 
         fsub (openSocks, readS) (key, tsub) =
             subscribe
@@ -113,6 +129,7 @@ updateHandlers rs tsubs =
             (return ())
             (writeHdlr subh)
             (Map.lookup key ts)
+
 
 writeHdlr :: SubHandler msg -> TSub msg -> STM ()
 writeHdlr (TCPClientHandler tv) (TCPClient _ getMore h) =
