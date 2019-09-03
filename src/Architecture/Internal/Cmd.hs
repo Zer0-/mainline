@@ -24,6 +24,7 @@ import Control.Concurrent.STM
     , TQueue
     , TVar
     , STM
+    , newTVar
     , newTQueue
     , writeTQueue
     , readTQueue
@@ -45,8 +46,8 @@ import Architecture.Internal.Types
     )
 
 execTCmd
-    :: Map Int (CmdQ, ThreadId) -- writeThreadS
-    -> TQueue (TCmd msg)        -- cmdSink
+    :: Map Int (CmdQ, a, ThreadId) -- writeThreadS
+    -> TQueue (TCmd msg)          -- cmdSink
     -> TCmd msg
     -> IO (Maybe msg)
 execTCmd _ _ (CmdGetRandom f) =
@@ -90,7 +91,7 @@ execTCmd wrT sink cmd = sinkTCmd wrT sink cmd
 
 
 execCmd
-    :: Map Int (CmdQ, ThreadId)
+    :: Map Int (CmdQ, a, ThreadId)
     -> TQueue (TCmd msg)
     -> Cmd msg
     -> IO ([ msg ])
@@ -98,7 +99,7 @@ execCmd wrT sink (Cmd l) = (mapM (execTCmd wrT sink) l) >>= (return . catMaybes)
 
 
 runCmds
-    :: Map.Map Int (CmdQ, ThreadId)
+    :: Map.Map Int (CmdQ, a, ThreadId)
     -> TQueue (TCmd msg)
     -> Config model msg
     -> IO ()
@@ -161,14 +162,14 @@ updateWriters_
     -> InternalState msg
     -> IO Socket
     -> STM (TQueue a)
-    -> (TQueue a -> Socket -> IO ())
+    -> (TQueue a -> TVar Bool -> Socket -> IO ())
     -> (TQueue a -> CmdQ)
     -> IO (InternalState msg)
 updateWriters_ cmd istate getsock getq threadmain initCmdQ = do
     writers <- readTVarIO (writeThreadS istate)
 
     case Map.lookup key writers of
-        (Just (cmdq, _)) -> enqueueCmd cmdq cmd >> return istate
+        (Just (cmdq, _, _)) -> enqueueCmd cmdq cmd >> return istate
         Nothing -> do
             (sock, istate2) <- case Map.lookup key (sockets istate) of
                 (Just sock) -> return (sock, istate)
@@ -181,42 +182,51 @@ updateWriters_ cmd istate getsock getq threadmain initCmdQ = do
                             }
                         )
 
-            newq <- atomically getq
+            (newq, qvar) <- atomically $ do
+                qvar <- newTVar quit
+                newq <- getq
 
-            threadId <- forkIO (threadmain newq sock)
+                return (newq, qvar)
+
+            threadId <- forkIO (threadmain newq qvar sock)
 
             atomically $ modifyTVar
                 (writeThreadS istate2)
-                (Map.insert key (initCmdQ newq, threadId))
+                (Map.insert key (initCmdQ newq, qvar, threadId))
 
             return istate2
 
     where
+        quit = Map.null (readThreadS istate)
         key = getKey cmd
 
 
-writeUDPMain :: TQueue (CompactInfo, BS.ByteString) -> Socket -> IO ()
-writeUDPMain q sock = forever $ do
+writeUDPMain
+    :: TQueue (CompactInfo, BS.ByteString)
+    -> TVar Bool
+    -> Socket
+    -> IO ()
+writeUDPMain q quit sock = forever $ do
     (ci, bs) <- atomically $ readTQueue q
     _ <- sendTo sock bs (ciToAddr ci)
     return ()
 
 
-writeTCPMain :: TQueue BS.ByteString -> Socket -> IO ()
-writeTCPMain q sock = forever $ do
+writeTCPMain :: TQueue BS.ByteString -> TVar Bool -> Socket -> IO ()
+writeTCPMain q quit sock = forever $ do
     bs <- atomically $ readTQueue q
     sendAll sock bs
     return ()
 
 
 sinkTCmd
-    :: Map Int (CmdQ, ThreadId)
+    :: Map Int (CmdQ, a, ThreadId)
     -> TQueue (TCmd msg)
     -> TCmd msg
     -> IO (Maybe msg)
 sinkTCmd wrT sink cmd = do
     case Map.lookup (getKey cmd) wrT of
-        (Just (cmdq, _)) -> enqueueCmd cmdq cmd
+        (Just (cmdq, _, _)) -> enqueueCmd cmdq cmd
         Nothing -> atomically $ writeTQueue sink cmd
 
     return Nothing

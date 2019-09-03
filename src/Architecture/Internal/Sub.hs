@@ -67,7 +67,14 @@ updateSubscriptions
 updateSubscriptions (Sub tsubs) cfg istate = do
     writeS <- atomically $ do
         updateHandlers currentReads tsubpairs
-        readTVar (writeThreadS istate)
+
+        ws <- readTVar (writeThreadS istate)
+
+        sequence_ $ map
+            ((flip writeTVar) True)
+            (map (\(_, x, _) -> x) (Map.elems (ws `Map.restrictKeys` (Map.keysSet unloads))))
+
+        return ws
 
     (newsocks, loaded) <- foldM fsub (Map.empty, Map.empty) loads
 

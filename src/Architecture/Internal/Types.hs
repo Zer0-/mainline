@@ -82,7 +82,7 @@ data SubHandler msg
 
 data InternalState msg = InternalState
     { readThreadS  :: Map Int (SubHandler msg, ThreadId)
-    , writeThreadS :: TVar (Map Int (CmdQ, ThreadId))
+    , writeThreadS :: TVar (Map Int (CmdQ, TVar Bool, ThreadId))
     , sockets      :: Map Int Socket
     , subSink      :: TMVar (Sub msg)
     , cmdSink      :: TQueue (TCmd msg)
