@@ -86,8 +86,8 @@ data InternalState msg = InternalState
     , writeThreadS
         :: TVar
             ( Map Int
-                ( CmdQ                  -- shared user handler functions
-                , TVar Bool             -- quit flag
+                ( CmdQ      -- shared user handler functions
+                , TVar Bool -- quit flag
                 , ThreadId
                 )
             )

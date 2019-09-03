@@ -13,7 +13,7 @@ import qualified Data.Map as Map
 import qualified Data.ByteString as BS
 import Crypto.Random (newGenIO, genBytes)
 import Crypto.Random.DRBG (CtrDRBG)
-import Network.Socket (Socket)
+import Network.Socket (Socket, close)
 import Network.Socket.ByteString (sendTo, sendAll)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.IO (hFlush, stdout)
@@ -155,6 +155,21 @@ updateWriters (CmdSendTCP ci bs) istate =
 
         cmd = CmdSendTCP ci bs
 
+updateWriters (QuitW key) istate = do
+    atomically $ modifyTVar
+        (writeThreadS istate)
+        (Map.delete key)
+
+    if Map.member key (readThreadS istate)
+    then return istate
+    else maybe
+        (return istate)
+        (\socket ->
+            close socket
+            >> return istate { sockets = Map.delete key (sockets istate) }
+        )
+        (Map.lookup key (sockets istate))
+
 updateWriters _ _ = undefined
 
 
@@ -178,9 +193,11 @@ updateWriters_ cmd istate getsock getq threadmain initCmdQ = do
 
     case Map.lookup key writers of
         (Just (cmdq, _, _)) -> enqueueCmd cmdq cmd >> return istate
+
         Nothing -> do
             (sock, istate2) <- case Map.lookup key (sockets istate) of
                 (Just sock) -> return (sock, istate)
+
                 Nothing -> do
                     sock <- getsock
                     return
