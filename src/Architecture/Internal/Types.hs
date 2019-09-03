@@ -32,6 +32,7 @@ data TCmd msg
     | CmdSendTCP CompactInfo BS.ByteString
     | CmdReadFile String (BS.ByteString -> msg)
     | CmdWriteFile String BS.ByteString
+    | QuitW Int
 
 
 newtype Cmd msg = Cmd [ TCmd msg ]

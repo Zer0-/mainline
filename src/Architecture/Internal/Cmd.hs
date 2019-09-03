@@ -5,7 +5,6 @@ module Architecture.Internal.Cmd
     ) where
 
 import Prelude hiding (init)
-import Control.Monad (forever)
 import System.Random (randomIO)
 import Data.Hashable (hash)
 import Data.Maybe (catMaybes)
@@ -21,6 +20,8 @@ import System.IO (hFlush, stdout)
 import Control.Concurrent (ThreadId, forkIO)
 import Control.Concurrent.STM
     ( atomically
+    , orElse
+    , retry
     , TQueue
     , TVar
     , STM
@@ -215,10 +216,9 @@ writeUDPMain
     -> TQueue (TCmd msg)
     -> Socket
     -> IO ()
-writeUDPMain q quit key qsink sock = forever $ do
-    (ci, bs) <- atomically $ readTQueue q
-    _ <- sendTo sock bs (ciToAddr ci)
-    return ()
+writeUDPMain q quit key qsink sock = runMain q quit key qsink sock send
+    where
+        send (ci, bs) = sendTo sock bs (ciToAddr ci) >> return ()
 
 
 writeTCPMain
@@ -228,10 +228,33 @@ writeTCPMain
     -> TQueue (TCmd msg)
     -> Socket
     -> IO ()
-writeTCPMain q quit key qsink sock = forever $ do
-    bs <- atomically $ readTQueue q
-    sendAll sock bs
-    return ()
+writeTCPMain q quit key qsink sock = runMain q quit key qsink sock send
+    where
+        send = sendAll sock
+
+
+runMain
+    :: TQueue a
+    -> TVar Bool
+    -> Int
+    -> TQueue (TCmd msg)
+    -> Socket
+    -> (a -> IO ())
+    -> IO ()
+runMain q quit key qsink sock fsend = do
+    msend <- atomically $ lexpr `orElse` rexpr
+
+    case msend of
+        Just x -> do
+            fsend x
+            runMain q quit key qsink sock fsend
+        Nothing -> do
+            atomically $ writeTQueue qsink (QuitW key)
+            return ()
+
+    where
+        lexpr = readTQueue q >>= return . Just
+        rexpr = readTVar quit >>= \q_ -> if q_ then (return Nothing) else retry
 
 
 sinkTCmd
