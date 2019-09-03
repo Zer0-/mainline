@@ -162,7 +162,14 @@ updateWriters_
     -> InternalState msg
     -> IO Socket
     -> STM (TQueue a)
-    -> (TQueue a -> TVar Bool -> Socket -> IO ())
+    ->
+        ( TQueue a
+        -> TVar Bool
+        -> Int
+        -> TQueue (TCmd msg)
+        -> Socket
+        -> IO ()
+        )
     -> (TQueue a -> CmdQ)
     -> IO (InternalState msg)
 updateWriters_ cmd istate getsock getq threadmain initCmdQ = do
@@ -182,17 +189,17 @@ updateWriters_ cmd istate getsock getq threadmain initCmdQ = do
                             }
                         )
 
-            (newq, qvar) <- atomically $ do
-                qvar <- newTVar quit
+            (newq, tquit) <- atomically $ do
+                tquit <- newTVar quit
                 newq <- getq
 
-                return (newq, qvar)
+                return (newq, tquit)
 
-            threadId <- forkIO (threadmain newq qvar sock)
+            threadId <- forkIO (threadmain newq tquit key (cmdSink istate) sock)
 
             atomically $ modifyTVar
                 (writeThreadS istate2)
-                (Map.insert key (initCmdQ newq, qvar, threadId))
+                (Map.insert key (initCmdQ newq, tquit, threadId))
 
             return istate2
 
@@ -204,16 +211,24 @@ updateWriters_ cmd istate getsock getq threadmain initCmdQ = do
 writeUDPMain
     :: TQueue (CompactInfo, BS.ByteString)
     -> TVar Bool
+    -> Int
+    -> TQueue (TCmd msg)
     -> Socket
     -> IO ()
-writeUDPMain q quit sock = forever $ do
+writeUDPMain q quit key qsink sock = forever $ do
     (ci, bs) <- atomically $ readTQueue q
     _ <- sendTo sock bs (ciToAddr ci)
     return ()
 
 
-writeTCPMain :: TQueue BS.ByteString -> TVar Bool -> Socket -> IO ()
-writeTCPMain q quit sock = forever $ do
+writeTCPMain
+    :: TQueue BS.ByteString
+    -> TVar Bool
+    -> Int
+    -> TQueue (TCmd msg)
+    -> Socket
+    -> IO ()
+writeTCPMain q quit key qsink sock = forever $ do
     bs <- atomically $ readTQueue q
     sendAll sock bs
     return ()
