@@ -3,13 +3,28 @@
   100 and 200 peers to their RT, so optimistically it's possible we were a third of the way there
 - This is before any kind of timed cleanup is implemented
 
+- trying 1000 nodes after stm upgrade (also with a fix for the main memory issue
+    but still on a single port) peaked cpu at 286% (avg about 120-150%)
+    and 38% memory, 397k+ nodes added, 37k unique info hashes announced, more are being added.
+    There is no strict end condition to this test.
 
+    - I hope the cpu usage goes down after the warmup is complete, there is a chance
+    that we are just going through the warmup process as fast as we can on one port
+    (and therefore one read thread).
+
+    - pausing xterm scrolling leaves cpu at 8%!
 
 
 
 
 Plan
 ====
+
+- Host nodes on multiple ports
+- Resolve info_hashes and start collecting data
+    - ask the database if it has the info_hash first
+    - initiate GetPeers for info hash
+    - propagate subs and cmds from ResolveMagnet
 
 Maybe
 -----

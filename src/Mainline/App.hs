@@ -30,10 +30,10 @@ import Mainline.RoutingTable (RoutingTable (..))
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 2000
+nMplex = 1000
 
 callPerSecondPerCi :: Int
-callPerSecondPerCi = 2
+callPerSecondPerCi = 5
 
 data Model = Model
     { models :: Array Int M.Model
@@ -63,7 +63,7 @@ subscriptions mm
     | isUn (m!0) = Sub.none
     | otherwise = Sub.batch
         [ Sub.udp M.servePort M.parseReceivedBytes
-        , Sub.timer 500 M.ProcessQueue
+        , Sub.timer 100 M.ProcessQueue
         , Sub.timer (60 * 1000) M.TimeoutTransactions
         , Sub.timer (5 * 60 * 1000) M.MaintainPeers
         ]
