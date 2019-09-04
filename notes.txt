@@ -23,13 +23,6 @@ Then we have Network.{Mainline, KRPC, Bittorrent}
 Priority
 --------
 
-- Write threads ✓
-- Cleanup of
-    - Sub threads
-    - Write threads (what are the conditions for each of these existing?)
-    - sockets map
-
-
 Misc
 ----
   - in a lib we depend on, BEncode instance for InfoDict encodes the dict it

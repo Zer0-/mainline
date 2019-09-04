@@ -8,6 +8,7 @@ module Architecture.TEA
 import qualified Data.Map as Map
 import Control.Concurrent.STM
     ( newTVar
+    , readTVar
     , readTVarIO
     , newEmptyTMVar
     , takeTMVar
@@ -36,17 +37,26 @@ data Config model msg =
 
 loop :: InternalState msg -> T.Config model msg -> IO ()
 loop self cfg = do
-    thing <- atomically $ lexpr `orElse` rexpr
+    mthing <- atomically $ do
+        writeS <- readTVar (writeThreadS self)
 
-    newself <- case thing of
-        (Left tcmd) -> updateWriters tcmd self
-        (Right sub) -> updateSubscriptions sub cfg self
+        if Map.null writeS && Map.null (readThreadS self) then
+            getThing `orElse` return Nothing
+        else getThing
 
-    loop newself cfg
+    case mthing of
+        Nothing -> return ()
+        Just thing -> do
+            newself <- case thing of
+                (Left tcmd) -> updateWriters tcmd self
+                (Right sub) -> updateSubscriptions sub cfg self
+
+            loop newself cfg
 
     where
         lexpr = readTQueue (cmdSink self) >>= return . Left
         rexpr = takeTMVar (subSink self) >>= return . Right
+        getThing = (lexpr `orElse` rexpr) >>= return . Just
 
 
 run2 :: InternalState msg -> T.Config model msg -> IO ()
