@@ -23,8 +23,38 @@ Plan
 - Host nodes on multiple ports
 - Resolve info_hashes and start collecting data
     - ask the database if it has the info_hash first
+        - connect to pg
+        - init pg table(s)
+        - query and write rows
+            - full text search column
     - initiate GetPeers for info hash
     - propagate subs and cmds from ResolveMagnet
+        - probably should add support for multiple peers there
+
+
+DB stuff
+--------
+
+- Where to keep open connection pool?
+    - writeThreadS entry of (TQueue DBSession, TVar Bool, ThreadId)
+        - ignore quit flag?
+
+    - write thread needs persistent state?
+
+- Cmd interface?
+    - Cmd.db :: Session -> Cmd msg
+
+- DB metadata table
+    - info_hash (PK)
+    - name
+    - time added
+    - file list?
+    - File table ?
+        - name
+        - path
+        - size
+        - part of metadata
+    - search index
 
 Maybe
 -----

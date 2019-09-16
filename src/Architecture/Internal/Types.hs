@@ -15,10 +15,13 @@ import qualified Data.ByteString as BS
 import Network.Socket
     ( Socket
     )
+import Generics.SOP (K (..))
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (Hashable, hashWithSalt)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM (TVar, TMVar, TQueue)
+import Squeal.PostgreSQL.Pool (Pool)
+import Squeal.PostgreSQL.PQ (Connection)
 
 import Network.KRPC.Types (Port, CompactInfo)
 
@@ -81,17 +84,11 @@ data SubHandler msg
     | TimerHandler (TVar (POSIXTime -> msg))
 
 
-data InternalState msg = InternalState
+data InternalState msg schemas = InternalState
     { readThreadS  :: Map Int (SubHandler msg, ThreadId)
-    , writeThreadS
-        :: TVar
-            ( Map Int
-                ( CmdQ      -- shared user handler functions
-                , TVar Bool -- quit flag
-                , ThreadId
-                )
-            )
+    , writeThreadS :: TVar (Map Int (CmdQ, TVar Bool, ThreadId))
     , sockets      :: Map Int Socket
+    , dbPool       :: Maybe (Pool (K Connection schemas))
     , subSink      :: TMVar (Sub msg)
     , cmdSink      :: TQueue (TCmd msg)
     }

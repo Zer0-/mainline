@@ -62,8 +62,8 @@ udpTimeout = 10 * (((^) :: Int -> Int -> Int) 10 6)
 updateSubscriptions
     :: Sub msg
     -> Config model msg
-    -> InternalState msg
-    -> IO (InternalState msg)
+    -> InternalState msg schemas
+    -> IO (InternalState msg schemas)
 updateSubscriptions (Sub tsubs) cfg istate = do
     writeS <- atomically $ do
         updateHandlers currentReads tsubpairs
@@ -159,7 +159,7 @@ updateOwnHandler key subHdlr (Sub tsubs) =
 
 subscribe
     :: Config model msg
-    -> InternalState msg
+    -> InternalState msg schemas
     -> Int
     -> Maybe Socket
     -> TSub msg
@@ -195,7 +195,7 @@ subscribe cfg istate key _ (Timer ms h) = do
 
 runTCPClientSub
     :: Config model msg
-    -> InternalState msg
+    -> InternalState msg schemas
     -> Int
     -> Socket
     -> TVar (BS.ByteString -> Int, Received -> msg)
@@ -231,7 +231,7 @@ runTCPClientSub cfg istate key sock tfns = forever $ do
 
 runUDPSub
     :: Config model msg
-    -> InternalState msg
+    -> InternalState msg schemas
     -> Int
     -> Socket
     -> TVar (CompactInfo -> Received -> msg)
@@ -263,7 +263,7 @@ runUDPSub cfg istate key sock tHandler = forever $ do
 
 runTimerSub
     :: Config model msg
-    -> InternalState msg
+    -> InternalState msg schemas
     -> Int -- key
     -> Int -- timeout (ms)
     -> TVar (POSIXTime -> msg)
@@ -292,7 +292,7 @@ runTimerSub cfg istate key ms tHandler = forever $ do
 
 handleCmd
     :: Config model msg
-    -> InternalState msg
+    -> InternalState msg schemas
     -> Cmd msg
     -> IO ()
 handleCmd cfg istate cmd = do

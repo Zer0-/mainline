@@ -48,7 +48,7 @@ import Architecture.Internal.Types
 
 execTCmd
     :: Map Int (CmdQ, a, ThreadId) -- writeThreadS
-    -> TQueue (TCmd msg)          -- cmdSink
+    -> TQueue (TCmd msg)           -- cmdSink
     -> TCmd msg
     -> IO (Maybe msg)
 execTCmd _ _ (CmdGetRandom f) =
@@ -119,8 +119,8 @@ runCmds writeS sink cfg = do
 
 updateWriters
     :: TCmd msg
-    -> InternalState msg
-    -> IO (InternalState msg)
+    -> InternalState msg schemas
+    -> IO (InternalState msg schemas)
 updateWriters (CmdSendUDP srcPort ci bs) istate =
     updateWriters_
         cmd
@@ -175,7 +175,7 @@ updateWriters _ _ = undefined
 
 updateWriters_
     :: TCmd msg
-    -> InternalState msg
+    -> InternalState msg schemas
     -> IO Socket
     -> STM (TQueue a)
     ->
@@ -187,7 +187,7 @@ updateWriters_
         -> IO ()
         )
     -> (TQueue a -> CmdQ)
-    -> IO (InternalState msg)
+    -> IO (InternalState msg schemas)
 updateWriters_ cmd istate getsock getq threadmain initCmdQ = do
     writers <- readTVarIO (writeThreadS istate)
 

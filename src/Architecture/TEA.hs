@@ -35,7 +35,7 @@ data Config model msg =
         (model -> Sub msg)
 
 
-loop :: InternalState msg -> T.Config model msg -> IO ()
+loop :: InternalState msg schemas -> T.Config model msg -> IO ()
 loop self cfg = do
     mthing <- atomically $ do
         writeS <- readTVar (writeThreadS self)
@@ -59,7 +59,7 @@ loop self cfg = do
         getThing = (lexpr `orElse` rexpr) >>= return . Just
 
 
-run2 :: InternalState msg -> T.Config model msg -> IO ()
+run2 :: InternalState msg schemas -> T.Config model msg -> IO ()
 run2 self cfg = do
     writeS <- readTVarIO $ writeThreadS self
     runCmds writeS (cmdSink self) cfg
@@ -88,9 +88,10 @@ run (Config (m, cmd) fupdate subs) = do
 
     run2
         ( InternalState
-            Map.empty
-            writeS
-            Map.empty
+            Map.empty -- readThreadS
+            writeS    -- writeThreadS
+            Map.empty -- sockets
+            Nothing   -- dbPool
             subsink
             cmdsink
         )

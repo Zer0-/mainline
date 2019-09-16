@@ -6,12 +6,14 @@ let
 
   bittorrent = pkgs.callPackage ../sources/bittorrent/default.nix {};
 
+  squeal-postgresql = pkgs.callPackage ../squeal/shell.nix {};
+
   f = { mkDerivation, base, bencoding, bytestring, containers
       , Crypto, HUnit, network, QuickCheck, stdenv, test-framework
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
       , DRBG, text, time, cabal-install, network-transport, cpu
       , parsec, lrucache, hex, cereal, data-default, bittorrent
-      , llvmPackages_6
+      , squeal-postgresql, llvmPackages_6
       #safe-exceptions
       }:
       mkDerivation {
@@ -24,7 +26,7 @@ let
         executableHaskellDepends = [
           base bencoding bytestring containers Crypto network crypto-api
           DRBG text time cpu parsec lrucache cereal data-default bittorrent
-          llvmPackages_6.llvm
+          squeal-postgresql llvmPackages_6.llvm
           #safe-exceptions
         ];
         testHaskellDepends = [
@@ -42,6 +44,7 @@ let
   drv = haskellPackages.callPackage f
     {
       bittorrent = bittorrent;
+      squeal-postgresql = squeal-postgresql;
     };
 
 in
