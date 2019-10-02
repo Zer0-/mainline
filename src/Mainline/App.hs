@@ -14,7 +14,7 @@ import Data.Hashable (hashWithSalt, hash)
 
 import Architecture.Cmd (Cmd)
 import qualified Architecture.Cmd as Cmd
-import Architecture.TEA (Config (..), run)
+import Architecture.TEA (simpleApp)
 import Architecture.Sub (Sub)
 import qualified Architecture.Sub as Sub
 import qualified Mainline.Mainline as M
@@ -42,10 +42,7 @@ data Model = Model
     }
 
 main :: IO ()
-main = run config
-
-config :: Config Model M.Msg
-config = Config init update subscriptions
+main = simpleApp init update subscriptions
 
 init :: (Model, Cmd M.Msg)
 init =

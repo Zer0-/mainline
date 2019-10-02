@@ -1,7 +1,7 @@
 import Prelude hiding (init)
 import Data.Time.Clock.POSIX (POSIXTime)
 
-import Architecture.TEA (Config (..), run)
+import Architecture.TEA (simpleApp)
 import qualified Architecture.Cmd as Cmd
 import Architecture.Sub (Sub)
 import qualified Architecture.Sub as Sub
@@ -37,8 +37,6 @@ subscriptions n
         , Sub.timer 10000 Timeout
         ]
 
-config :: Config Model Msg
-config = Config init update subscriptions
 
 main :: IO ()
-main = run config
+main = simpleApp init update subscriptions

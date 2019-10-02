@@ -21,7 +21,7 @@ import qualified Data.Torrent as BTT
 import Network.KRPC.Helpers (stringpack)
 import Network.KRPC.Types (Port, CompactInfo(..))
 import Network.Octets (fromOctets, fromByteString)
-import Architecture.TEA (Config (..), run)
+import Architecture.TEA (simpleApp)
 import Architecture.Sub (Sub, Received(..))
 import qualified Architecture.Sub as Sub
 import qualified Architecture.Cmd as Cmd
@@ -57,9 +57,6 @@ data Msg
     = NewNodeID ByteString
     | GotHandshake (Either String BT.Handshake)
     | Got (Either String BT.Message)
-
-config :: Config Model Msg
-config = Config init update subscriptions
 
 init :: (Model, Cmd Msg)
 init = (Off, Cmd.randomBytes 20 NewNodeID)
@@ -261,4 +258,4 @@ pieceReq msgid i ci =
 
 
 main :: IO ()
-main = run config
+main = simpleApp init update subscriptions

@@ -1,8 +1,9 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
 module Architecture.TEA
-    ( Config (Config)
-    , run
+    ( Program
+    , dbApp
+    , simpleApp
     ) where
 
 import qualified Data.Map as Map
@@ -18,24 +19,22 @@ import Control.Concurrent.STM
     , orElse
     )
 
+import Prelude hiding (init)
+--import Generics.SOP (K (..))
+import Squeal.PostgreSQL.Pool (Pool, createConnectionPool)
+import Data.ByteString (ByteString)
+
 import Architecture.Internal.Cmd (runCmds, updateWriters)
 import Architecture.Internal.Types
     ( InternalState (..)
     , Cmd (..)
     , Sub (..)
+    , Program (..)
     )
-import qualified Architecture.Internal.Types as T
 import Architecture.Internal.Sub (updateSubscriptions)
 
 
-data Config model msg =
-    Config
-        (model, Cmd msg)
-        (msg -> model -> (model, Cmd msg))
-        (model -> Sub msg)
-
-
-loop :: InternalState msg schemas -> T.Config model msg -> IO ()
+loop :: InternalState msg schemas -> Program model msg -> IO ()
 loop self cfg = do
     mthing <- atomically $ do
         writeS <- readTVar (writeThreadS self)
@@ -59,24 +58,29 @@ loop self cfg = do
         getThing = (lexpr `orElse` rexpr) >>= return . Just
 
 
-run2 :: InternalState msg schemas -> T.Config model msg -> IO ()
+run2 :: InternalState msg schemas -> Program model msg -> IO ()
 run2 self cfg = do
     writeS <- readTVarIO $ writeThreadS self
     runCmds writeS (cmdSink self) cfg
 
-    model <- readTVarIO $ fst $ T.init cfg
+    model <- readTVarIO $ fst $ init cfg
 
     newself <-
         updateSubscriptions
-            ((T.subscriptions cfg) model)
+            ((subscriptions cfg) model)
             cfg
             self
 
     loop newself cfg
 
 
-run :: Config model msg -> IO ()
-run (Config (m, cmd) fupdate subs) = do
+run
+    :: Maybe (Pool schemas)
+    -> (model, Cmd msg)
+    -> (msg -> model -> (model, Cmd msg))
+    -> (model -> Sub msg)
+    -> IO ()
+run dbpool (m, cmd) fupdate subs = do
     (tmodel, writeS, subsink, cmdsink) <- atomically $ do
         tmodel <- newTVar m
         writeS <- newTVar Map.empty
@@ -84,15 +88,33 @@ run (Config (m, cmd) fupdate subs) = do
         cmdsink <- newTQueue
         return (tmodel, writeS, subsink, cmdsink)
 
-    let cfg = T.Config (tmodel, cmd) fupdate subs
+    let cfg = Program (tmodel, cmd) fupdate subs
 
     run2
         ( InternalState
             Map.empty -- readThreadS
             writeS    -- writeThreadS
             Map.empty -- sockets
-            Nothing   -- dbPool
+            dbpool
             subsink
             cmdsink
         )
         cfg
+
+
+simpleApp
+    :: (model, Cmd msg)
+    -> (msg -> model -> (model, Cmd msg))
+    -> (model -> Sub msg)
+    -> IO ()
+simpleApp = run Nothing
+
+dbApp
+    :: (model, Cmd msg)
+    -> (msg -> model -> (model, Cmd msg))
+    -> (model -> Sub msg)
+    -> ByteString
+    -> IO ()
+dbApp initial fupdate subs connstr = do
+    pool <- createConnectionPool connstr 1 1 1
+    run (Just pool) initial fupdate subs

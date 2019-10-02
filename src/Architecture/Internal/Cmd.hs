@@ -42,7 +42,7 @@ import Architecture.Internal.Types
     , TCmd (..)
     , TSub (..)
     , CmdQ (..)
-    , Config (..)
+    , Program (..)
     , InternalState (..)
     )
 
@@ -102,7 +102,7 @@ execCmd wrT sink (Cmd l) = (mapM (execTCmd wrT sink) l) >>= (return . catMaybes)
 runCmds
     :: Map.Map Int (CmdQ, a, ThreadId)
     -> TQueue (TCmd msg)
-    -> Config model msg
+    -> Program model msg
     -> IO ()
 runCmds writeS sink cfg = do
     (msgs) <- execCmd writeS sink cmd

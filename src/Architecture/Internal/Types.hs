@@ -6,7 +6,7 @@ module Architecture.Internal.Types
     , Cmd (..)
     , TSub (..)
     , Sub (..)
-    , Config (..)
+    , Program (..)
     , CmdQ (..)
     ) where
 
@@ -15,13 +15,12 @@ import qualified Data.ByteString as BS
 import Network.Socket
     ( Socket
     )
-import Generics.SOP (K (..))
+--import Generics.SOP (K (..))
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (Hashable, hashWithSalt)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM (TVar, TMVar, TQueue)
 import Squeal.PostgreSQL.Pool (Pool)
-import Squeal.PostgreSQL.PQ (Connection)
 
 import Network.KRPC.Types (Port, CompactInfo)
 
@@ -56,8 +55,8 @@ instance Hashable (TSub msg) where
 newtype Sub msg = Sub [ TSub msg ]
 
 
-data Config model msg =
-    Config
+data Program model msg =
+    Program
     { init          :: (TVar model, Cmd msg)
     , update        :: msg -> model -> (model, Cmd msg)
     , subscriptions :: model -> Sub msg
@@ -88,7 +87,7 @@ data InternalState msg schemas = InternalState
     { readThreadS  :: Map Int (SubHandler msg, ThreadId)
     , writeThreadS :: TVar (Map Int (CmdQ, TVar Bool, ThreadId))
     , sockets      :: Map Int Socket
-    , dbPool       :: Maybe (Pool (K Connection schemas))
+    , dbPool       :: Maybe (Pool schemas)
     , subSink      :: TMVar (Sub msg)
     , cmdSink      :: TQueue (TCmd msg)
     }

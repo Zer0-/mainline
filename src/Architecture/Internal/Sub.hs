@@ -33,7 +33,7 @@ import Control.Concurrent.STM
 import Network.KRPC.Types (CompactInfo)
 import Architecture.Internal.Types
     ( InternalState (..)
-    , Config (..)
+    , Program (..)
     , Received (..)
     , TSub (..)
     , Cmd (..)
@@ -61,7 +61,7 @@ udpTimeout = 10 * (((^) :: Int -> Int -> Int) 10 6)
 
 updateSubscriptions
     :: Sub msg
-    -> Config model msg
+    -> Program model msg
     -> InternalState msg schemas
     -> IO (InternalState msg schemas)
 updateSubscriptions (Sub tsubs) cfg istate = do
@@ -158,7 +158,7 @@ updateOwnHandler key subHdlr (Sub tsubs) =
 
 
 subscribe
-    :: Config model msg
+    :: Program model msg
     -> InternalState msg schemas
     -> Int
     -> Maybe Socket
@@ -194,7 +194,7 @@ subscribe cfg istate key _ (Timer ms h) = do
 
 
 runTCPClientSub
-    :: Config model msg
+    :: Program model msg
     -> InternalState msg schemas
     -> Int
     -> Socket
@@ -230,7 +230,7 @@ runTCPClientSub cfg istate key sock tfns = forever $ do
 
 
 runUDPSub
-    :: Config model msg
+    :: Program model msg
     -> InternalState msg schemas
     -> Int
     -> Socket
@@ -262,7 +262,7 @@ runUDPSub cfg istate key sock tHandler = forever $ do
 
 
 runTimerSub
-    :: Config model msg
+    :: Program model msg
     -> InternalState msg schemas
     -> Int -- key
     -> Int -- timeout (ms)
@@ -291,7 +291,7 @@ runTimerSub cfg istate key ms tHandler = forever $ do
 
 
 handleCmd
-    :: Config model msg
+    :: Program model msg
     -> InternalState msg schemas
     -> Cmd msg
     -> IO ()

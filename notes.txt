@@ -68,6 +68,23 @@ Then we have Network.{Mainline, KRPC, Bittorrent}
 Priority
 --------
 
+- What is the database interface for our TEA style framework?
+    - We need a connection string from the lib user
+        - Should this be passed to run via Config? Or should this be passed
+            - ConfigWithDB model msg schemas, runwdb
+            - rename Config to Program?
+            - Cons of this are that we cannot issue Cmds to get the connection string dynamically
+            - There is only one allowed db pool however, so only one database can be used at a time.
+                Given that we've accepted this limitation maybe it's ok to pass
+                the connection string at the beggining.
+        - on a per-command basis?
+            - Cons of this are passing the same string each time we run a cmd
+    - Need a query
+    - Need a session (which probably tells squeal how to get the result)
+
+- Actually we first just need to query our db for an infohash to see if we should get
+  the metainfo for it. How is that so hard?
+
 Misc
 ----
   - in a lib we depend on, BEncode instance for InfoDict encodes the dict it
