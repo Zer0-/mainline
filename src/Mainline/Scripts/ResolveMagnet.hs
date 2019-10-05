@@ -1,4 +1,4 @@
-{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE NamedFieldPuns, DataKinds #-}
 
 import Prelude hiding (init)
 import Control.Applicative (liftA2)
@@ -25,7 +25,8 @@ import Architecture.TEA (simpleApp)
 import Architecture.Sub (Sub, Received(..))
 import qualified Architecture.Sub as Sub
 import qualified Architecture.Cmd as Cmd
-import Architecture.Cmd (Cmd)
+
+type Cmd msg = Cmd.Cmd msg '[]
 
 knownNodeHost :: Word32
 knownNodeHost = fromOctets [ 192, 168, 4, 2 ]

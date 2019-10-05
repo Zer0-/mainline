@@ -61,7 +61,7 @@ udpTimeout = 10 * (((^) :: Int -> Int -> Int) 10 6)
 
 updateSubscriptions
     :: Sub msg
-    -> Program model msg
+    -> Program model msg schemas
     -> InternalState msg schemas
     -> IO (InternalState msg schemas)
 updateSubscriptions (Sub tsubs) cfg istate = do
@@ -158,7 +158,7 @@ updateOwnHandler key subHdlr (Sub tsubs) =
 
 
 subscribe
-    :: Program model msg
+    :: Program model msg schemas
     -> InternalState msg schemas
     -> Int
     -> Maybe Socket
@@ -194,7 +194,7 @@ subscribe cfg istate key _ (Timer ms h) = do
 
 
 runTCPClientSub
-    :: Program model msg
+    :: Program model msg schemas
     -> InternalState msg schemas
     -> Int
     -> Socket
@@ -230,7 +230,7 @@ runTCPClientSub cfg istate key sock tfns = forever $ do
 
 
 runUDPSub
-    :: Program model msg
+    :: Program model msg schemas
     -> InternalState msg schemas
     -> Int
     -> Socket
@@ -262,7 +262,7 @@ runUDPSub cfg istate key sock tHandler = forever $ do
 
 
 runTimerSub
-    :: Program model msg
+    :: Program model msg schemas
     -> InternalState msg schemas
     -> Int -- key
     -> Int -- timeout (ms)
@@ -291,17 +291,12 @@ runTimerSub cfg istate key ms tHandler = forever $ do
 
 
 handleCmd
-    :: Program model msg
+    :: Program model msg schemas
     -> InternalState msg schemas
-    -> Cmd msg
+    -> Cmd msg schemas
     -> IO ()
 handleCmd cfg istate cmd = do
-    writeS <- readTVarIO $ writeThreadS istate
-
-    runCmds
-        writeS
-        (cmdSink istate)
-        cfg { init = (tmodel, cmd) }
+    runCmds istate cfg { init = (tmodel, cmd) }
 
     atomically $ do
         model <- readTVar tmodel

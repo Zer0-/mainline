@@ -12,13 +12,12 @@ import Data.Cache.LRU (LRU, newLRU, lookup, insert)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (hashWithSalt, hash)
 
-import Architecture.Cmd (Cmd)
 import qualified Architecture.Cmd as Cmd
 import Architecture.TEA (simpleApp)
 import Architecture.Sub (Sub)
 import qualified Architecture.Sub as Sub
 import qualified Mainline.Mainline as M
-import Mainline.Mainline (Msg (..))
+import Mainline.Mainline (Msg (..), Cmd)
 import Network.KRPC (KPacket (..))
 import Network.KRPC.Types
     ( Message     (..)

@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 import Data.Word (Word32)
 
 import qualified Architecture.Cmd as Cmd
@@ -21,7 +23,7 @@ seedNodeInfo :: CompactInfo
 seedNodeInfo = CompactInfo seedNodeHost seedNodePort
 
 
-update :: b -> a -> (a, Cmd.Cmd b)
+update :: b -> a -> (a, Cmd.Cmd b '[])
 update _ _ = (undefined, Cmd.none)
 
 main :: IO ()

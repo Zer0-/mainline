@@ -1,4 +1,8 @@
-{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE
+    NamedFieldPuns
+  , KindSignatures
+  , DataKinds
+#-}
 
 module Architecture.TEA
     ( Program
@@ -20,8 +24,9 @@ import Control.Concurrent.STM
     )
 
 import Prelude hiding (init)
---import Generics.SOP (K (..))
+import Generics.SOP (K (..))
 import Squeal.PostgreSQL.Pool (Pool, createConnectionPool, destroyAllResources)
+import Squeal.PostgreSQL (Connection)
 import Data.ByteString (ByteString)
 
 import Architecture.Internal.Cmd (runCmds, updateWriters)
@@ -34,7 +39,7 @@ import Architecture.Internal.Types
 import Architecture.Internal.Sub (updateSubscriptions)
 
 
-loop :: InternalState msg schemas -> Program model msg -> IO ()
+loop :: InternalState msg schemas -> Program model msg schemas -> IO ()
 loop self cfg = do
     mthing <- atomically $ do
         writeS <- readTVar (writeThreadS self)
@@ -58,10 +63,9 @@ loop self cfg = do
         getThing = (lexpr `orElse` rexpr) >>= return . Just
 
 
-run2 :: InternalState msg schemas -> Program model msg -> IO ()
+run2 :: InternalState msg schemas -> Program model msg schemas -> IO ()
 run2 self cfg = do
-    writeS <- readTVarIO $ writeThreadS self
-    runCmds writeS (cmdSink self) cfg
+    runCmds self cfg
 
     model <- readTVarIO $ fst $ init cfg
 
@@ -75,9 +79,9 @@ run2 self cfg = do
 
 
 run
-    :: Maybe (Pool schemas)
-    -> (model, Cmd msg)
-    -> (msg -> model -> (model, Cmd msg))
+    :: Maybe (Pool (K Connection schemas))
+    -> (model, Cmd msg schemas)
+    -> (msg -> model -> (model, Cmd msg schemas))
     -> (model -> Sub msg)
     -> IO ()
 run dbpool (m, cmd) fupdate subs = do
@@ -103,15 +107,15 @@ run dbpool (m, cmd) fupdate subs = do
 
 
 simpleApp
-    :: (model, Cmd msg)
-    -> (msg -> model -> (model, Cmd msg))
+    :: (model, Cmd msg schemas)
+    -> (msg -> model -> (model, Cmd msg schemas))
     -> (model -> Sub msg)
     -> IO ()
 simpleApp = run Nothing
 
 dbApp
-    :: (model, Cmd msg)
-    -> (msg -> model -> (model, Cmd msg))
+    :: (model, Cmd msg schemas)
+    -> (msg -> model -> (model, Cmd msg schemas))
     -> (model -> Sub msg)
     -> ByteString
     -> IO ()

@@ -1,10 +1,11 @@
-{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE NamedFieldPuns, DataKinds #-}
 
 module Mainline.Mainline
     ( Model (..)
     , Msg (..)
     , ServerState (..)
     , ServerConfig (..)
+    , Cmd
     , update
     , parseReceivedBytes
     , servePort
@@ -27,7 +28,7 @@ import Data.BEncode                  (encode, decode)
 import Data.Time.Clock.POSIX         (POSIXTime)
 
 --import Architecture.TEA              (Config (..), run)
-import Architecture.Cmd              (Cmd)
+-- import Architecture.Cmd              (Cmd)
 import qualified Architecture.Cmd as Cmd
 --import qualified Architecture.Sub as Sub
 --import Architecture.Sub              (Sub, Received (..))
@@ -56,6 +57,8 @@ import Network.KRPC.Types
     , ResponseDat (..)
     , NodeInfo    (..)
     )
+
+type Cmd msg = Cmd.Cmd msg '[]
 
 {-
  - TODO:

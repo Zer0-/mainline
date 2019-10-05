@@ -2,7 +2,6 @@
     DataKinds
   , KindSignatures
   , ExistentialQuantification
-  , RankNTypes
 #-}
 
 module Architecture.Internal.Types
@@ -24,14 +23,14 @@ import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (Hashable, hashWithSalt)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM (TVar, TMVar, TQueue)
-import Squeal.PostgreSQL (SchemasType, Connection)
+import Squeal.PostgreSQL (Connection)
 import Squeal.PostgreSQL.Pool (Pool, PoolPQ)
 import Generics.SOP (K (..))
 
 import Network.KRPC.Types (Port, CompactInfo)
 
 
-data TCmd msg
+data TCmd msg schemas
     = CmdLog String
     | CmdGetRandom (Float -> msg)
     | CmdGetTime (POSIXTime -> msg)
@@ -40,12 +39,12 @@ data TCmd msg
     | CmdSendTCP CompactInfo BS.ByteString
     | CmdReadFile String (BS.ByteString -> msg)
     | CmdWriteFile String BS.ByteString
-    | forall schemas result.
-        CmdDatabase (PoolPQ (schemas :: SchemasType) IO result) (result -> msg)
+    | forall result.
+        CmdDatabase (PoolPQ schemas IO result) (result -> msg)
     | QuitW Int
 
 
-newtype Cmd msg = Cmd [ TCmd msg ]
+newtype Cmd msg schemas = Cmd [ TCmd msg schemas ]
 
 
 data TSub msg
@@ -63,10 +62,10 @@ instance Hashable (TSub msg) where
 newtype Sub msg = Sub [ TSub msg ]
 
 
-data Program model msg =
+data Program model msg schemas =
     Program
-    { init          :: (TVar model, Cmd msg)
-    , update        :: msg -> model -> (model, Cmd msg)
+    { init          :: (TVar model, Cmd msg schemas)
+    , update        :: msg -> model -> (model, Cmd msg schemas)
     , subscriptions :: model -> Sub msg
     }
 
@@ -95,7 +94,7 @@ data InternalState msg schemas = InternalState
     { readThreadS  :: Map Int (SubHandler msg, ThreadId)
     , writeThreadS :: TVar (Map Int (CmdQ, TVar Bool, ThreadId))
     , sockets      :: Map Int Socket
-    , dbPool       :: forall schemas. Maybe (Pool (K Connection (schemas :: SchemasType)))
+    , dbPool       :: Maybe (Pool (K Connection schemas))
     , subSink      :: TMVar (Sub msg)
-    , cmdSink      :: TQueue (TCmd msg)
+    , cmdSink      :: TQueue (TCmd msg schemas)
     }

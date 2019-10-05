@@ -33,20 +33,10 @@ data Msg
     | Timeout POSIXTime
     | PGResult Float
 
-init :: (Model, Cmd.Cmd Msg)
+init :: (Model, Cmd.Cmd Msg EmptySchema)
 init = (0, Cmd.getRandom Increment)
 
-query :: Query_ (Public '[]) (Only Float) (Only Float)
-query = values_ $ ((param @1) + (param @1)) `as` #fromOnly
-
-session :: Float -> PoolPQ (Public '[]) IO Float
-session i = do
-    result <- runQueryParams query (Only i)
-    Just (Only ii) <- firstRow result
-    return ii
-
-
-update :: Msg -> Model -> (Model, Cmd.Cmd Msg)
+update :: Msg -> Model -> (Model, Cmd.Cmd Msg EmptySchema)
 update (Increment i) n = (n, Cmd.batch [ cmdlog, dbcmd ])
     where
         cmdlog = Cmd.log Cmd.DEBUG [ show n, show i, show $ n + i ]
@@ -73,6 +63,18 @@ subscriptions n
         [ Sub.udp 51411 (\_ -> Got)
         , Sub.timer 10000 Timeout
         ]
+
+type EmptySchema = Public '[]
+
+query :: Query_ EmptySchema (Only Float) (Only Float)
+query = values_ $ ((param @1) + (param @1)) `as` #fromOnly
+
+
+session :: Float -> PoolPQ EmptySchema IO Float
+session i = do
+    result <- runQueryParams query (Only i)
+    Just (Only ii) <- firstRow result
+    return ii
 
 
 main :: IO ()

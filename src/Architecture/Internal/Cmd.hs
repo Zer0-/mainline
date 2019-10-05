@@ -40,7 +40,7 @@ import Control.Concurrent.STM
     , writeTVar
     , modifyTVar
     )
-import Squeal.PostgreSQL (SchemasType, Connection)
+import Squeal.PostgreSQL (Connection)
 import Squeal.PostgreSQL.Pool (Pool, PoolPQ (runPoolPQ))
 import Generics.SOP (K (..))
 
@@ -57,9 +57,9 @@ import Architecture.Internal.Types
 
 execTCmd
     :: TVar (Map Int (CmdQ, a, ThreadId)) -- writeThreadS
-    -> TQueue (TCmd msg)                  -- cmdSink
-    -> Maybe (Pool (K Connection (schemas :: SchemasType)))
-    -> TCmd msg
+    -> TQueue (TCmd msg schemas)                  -- cmdSink
+    -> Maybe (Pool (K Connection schemas))
+    -> TCmd msg schemas
     -> IO (Maybe msg)
 execTCmd _ _ _ (CmdGetRandom f) =
     randomIO >>= \i -> return (Just $ f i)
@@ -108,9 +108,9 @@ execTCmd wrT sink _ cmd = atomically $ sinkTCmd wrT sink cmd >> return Nothing
 
 execCmd
     :: TVar (Map Int (CmdQ, a, ThreadId))
-    -> TQueue (TCmd msg)
-    -> Maybe (Pool (K Connection (schemas :: SchemasType)))
-    -> Cmd msg
+    -> TQueue (TCmd msg schemas)
+    -> Maybe (Pool (K Connection schemas))
+    -> Cmd msg schemas
     -> IO ([ msg ])
 execCmd wrT sink mpool (Cmd l) =
     (mapM (execTCmd wrT sink mpool) l) >>= (return . catMaybes)
@@ -118,7 +118,7 @@ execCmd wrT sink mpool (Cmd l) =
 
 runCmds
     :: InternalState msg schemas
-    -> Program model msg
+    -> Program model msg schemas
     -> IO ()
 runCmds istate cfg = do
     msgs <- execCmd (writeThreadS istate)
@@ -137,7 +137,7 @@ runCmds istate cfg = do
 
 
 updateWriters
-    :: TCmd msg
+    :: TCmd msg schemas
     -> InternalState msg schemas
     -> IO (InternalState msg schemas)
 updateWriters (CmdSendUDP srcPort ci bs) istate =
@@ -193,7 +193,7 @@ updateWriters _ _ = undefined
 
 
 updateWriters_
-    :: TCmd msg
+    :: TCmd msg schemas
     -> InternalState msg schemas
     -> IO Socket
     -> STM (TQueue a)
@@ -201,7 +201,7 @@ updateWriters_
         ( TQueue a
         -> TVar Bool
         -> Int
-        -> TQueue (TCmd msg)
+        -> TQueue (TCmd msg schemas)
         -> Socket
         -> IO ()
         )
@@ -249,7 +249,7 @@ writeUDPMain
     :: TQueue (CompactInfo, BS.ByteString)
     -> TVar Bool
     -> Int
-    -> TQueue (TCmd msg)
+    -> TQueue (TCmd msg schemas)
     -> Socket
     -> IO ()
 writeUDPMain q quit key qsink sock = runMain q quit key qsink sock send
@@ -261,7 +261,7 @@ writeTCPMain
     :: TQueue BS.ByteString
     -> TVar Bool
     -> Int
-    -> TQueue (TCmd msg)
+    -> TQueue (TCmd msg schemas)
     -> Socket
     -> IO ()
 writeTCPMain q quit key qsink sock = runMain q quit key qsink sock send
@@ -273,7 +273,7 @@ runMain
     :: TQueue a
     -> TVar Bool
     -> Int
-    -> TQueue (TCmd msg)
+    -> TQueue (TCmd msg schemas)
     -> Socket
     -> (a -> IO ())
     -> IO ()
@@ -295,8 +295,8 @@ runMain q quit key qsink sock fsend = do
 
 sinkTCmd
     :: TVar (Map Int (CmdQ, a, ThreadId))
-    -> TQueue (TCmd msg)
-    -> TCmd msg
+    -> TQueue (TCmd msg schemas)
+    -> TCmd msg schemas
     -> STM ()
 sinkTCmd writeS sink cmd = do
     wrT <- readTVar writeS
@@ -306,17 +306,17 @@ sinkTCmd writeS sink cmd = do
         Nothing -> writeTQueue sink cmd
 
 
-enqueueCmd :: CmdQ -> TCmd msg -> STM ()
+enqueueCmd :: CmdQ -> TCmd msg schemas -> STM ()
 enqueueCmd (UDPQueue q) (CmdSendUDP _ ci bs) = writeTQueue q (ci, bs)
 enqueueCmd (TCPQueue q) (CmdSendTCP _ bs)    = writeTQueue q bs
 enqueueCmd _            _                    = undefined
 
 
 foldMsgs
-    :: (msg -> model -> (model, Cmd msg))
+    :: (msg -> model -> (model, Cmd msg schemas))
     -> [ msg ]
     -> model
-    -> (model, Cmd msg)
+    -> (model, Cmd msg schemas)
 foldMsgs _ [] mdl = (mdl, Cmd [])
 foldMsgs f (x:xs) mdl = cmd2 `merge` foldMsgs f xs mdl2
     where
@@ -324,10 +324,10 @@ foldMsgs f (x:xs) mdl = cmd2 `merge` foldMsgs f xs mdl2
 
 
 foldMsgsStm
-    :: (msg -> model -> (model, Cmd msg))
+    :: (msg -> model -> (model, Cmd msg schemas))
     -> [ msg ]
     -> TVar model
-    -> STM (Cmd msg)
+    -> STM (Cmd msg schemas)
 foldMsgsStm up msgs tmodel = do
     model <- readTVar tmodel
     let (model2, cmds) = foldMsgs up msgs model
@@ -335,15 +335,15 @@ foldMsgsStm up msgs tmodel = do
     return cmds
 
 
-merge :: Cmd msg -> (model, Cmd msg) -> (model, Cmd msg)
+merge :: Cmd msg schemas -> (model, Cmd msg schemas) -> (model, Cmd msg schemas)
 merge c1 (m, c2) = (m, batch [c1, c2])
 
 
-batch :: [ Cmd msg ] -> Cmd msg
+batch :: [ Cmd msg schemas ] -> Cmd msg schemas
 batch cmds = Cmd $ concat [t | (Cmd t) <- cmds]
 
 
-getKey :: TCmd msg -> Int
+getKey :: TCmd msg schemas -> Int
 getKey (CmdSendUDP srcPort _ _) = hash $ UDP srcPort undefined
 getKey (CmdSendTCP ci _)        = hash $ TCPClient ci undefined undefined
 getKey _                        = undefined

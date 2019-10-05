@@ -35,30 +35,30 @@ import Architecture.Internal.Types
 
 -- TODO: use a config
 minLoglvl :: Int
-minLoglvl = fromEnum INFO
+minLoglvl = fromEnum DEBUG
 
 
-getRandom :: (Float -> msg) -> Cmd msg
+getRandom :: (Float -> msg) -> Cmd msg schemas
 getRandom f = Cmd [ CmdGetRandom f ]
 
-randomBytes :: Int -> (ByteString -> msg) -> Cmd msg
+randomBytes :: Int -> (ByteString -> msg) -> Cmd msg schemas
 randomBytes n f = Cmd [ CmdRandomBytes n f ]
 
-none :: Cmd msg
+none :: Cmd msg schemas
 none = Cmd []
 
-sendUDP :: Port -> CompactInfo -> ByteString -> Cmd msg
+sendUDP :: Port -> CompactInfo -> ByteString -> Cmd msg schemas
 sendUDP p dest bs = Cmd [ CmdSendUDP p dest bs ]
 
-sendTCP :: CompactInfo -> ByteString -> Cmd msg
+sendTCP :: CompactInfo -> ByteString -> Cmd msg schemas
 sendTCP ci bs = Cmd [ CmdSendTCP ci bs ]
 
-getTime :: (POSIXTime -> msg) -> Cmd msg
+getTime :: (POSIXTime -> msg) -> Cmd msg schemas
 getTime f = Cmd [ CmdGetTime f ]
 
 data Loglevel = WARNING | INFO | DEBUG deriving (Enum, Show)
 
-log :: Loglevel -> [ String ] -> Cmd msg
+log :: Loglevel -> [ String ] -> Cmd msg schemas
 log lvl xs
     | fromEnum lvl <= minLoglvl = Cmd [CmdLog s]
     | otherwise = none
@@ -67,17 +67,17 @@ log lvl xs
             ++ (intercalate " " xs)
             ++ "\n"
 
-print :: Show a => a -> Cmd msg
+print :: Show a => a -> Cmd msg schemas
 print x = Cmd [ CmdLog s ]
     where
         s = (show x) ++ "\n"
 
-readFile :: String -> (ByteString -> msg) -> Cmd msg
+readFile :: String -> (ByteString -> msg) -> Cmd msg schemas
 readFile filename f = Cmd [ CmdReadFile filename f ]
 
-writeFile :: String -> ByteString -> Cmd msg
+writeFile :: String -> ByteString -> Cmd msg schemas
 writeFile filename bs = Cmd [ CmdWriteFile filename bs ]
 
 
-db :: PoolPQ schema IO result -> (result -> msg) -> Cmd msg
-db schema f = Cmd [ CmdDatabase schema f ]
+db :: PoolPQ schemas IO result -> (result -> msg) -> Cmd msg schemas
+db schemas f = Cmd [ CmdDatabase schemas f ]
