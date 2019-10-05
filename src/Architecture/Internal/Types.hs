@@ -1,3 +1,10 @@
+{-# LANGUAGE
+    DataKinds
+  , KindSignatures
+  , ExistentialQuantification
+  , RankNTypes
+#-}
+
 module Architecture.Internal.Types
     ( Received (..)
     , InternalState (..)
@@ -12,15 +19,14 @@ module Architecture.Internal.Types
 
 import Data.Map (Map)
 import qualified Data.ByteString as BS
-import Network.Socket
-    ( Socket
-    )
---import Generics.SOP (K (..))
+import Network.Socket (Socket)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (Hashable, hashWithSalt)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM (TVar, TMVar, TQueue)
-import Squeal.PostgreSQL.Pool (Pool)
+import Squeal.PostgreSQL (SchemasType, Connection)
+import Squeal.PostgreSQL.Pool (Pool, PoolPQ)
+import Generics.SOP (K (..))
 
 import Network.KRPC.Types (Port, CompactInfo)
 
@@ -34,6 +40,8 @@ data TCmd msg
     | CmdSendTCP CompactInfo BS.ByteString
     | CmdReadFile String (BS.ByteString -> msg)
     | CmdWriteFile String BS.ByteString
+    | forall schemas result.
+        CmdDatabase (PoolPQ (schemas :: SchemasType) IO result) (result -> msg)
     | QuitW Int
 
 
@@ -87,7 +95,7 @@ data InternalState msg schemas = InternalState
     { readThreadS  :: Map Int (SubHandler msg, ThreadId)
     , writeThreadS :: TVar (Map Int (CmdQ, TVar Bool, ThreadId))
     , sockets      :: Map Int Socket
-    , dbPool       :: Maybe (Pool schemas)
+    , dbPool       :: forall schemas. Maybe (Pool (K Connection (schemas :: SchemasType)))
     , subSink      :: TMVar (Sub msg)
     , cmdSink      :: TQueue (TCmd msg)
     }

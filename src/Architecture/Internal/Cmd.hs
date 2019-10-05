@@ -1,3 +1,9 @@
+{-# LANGUAGE
+    DataKinds
+  , KindSignatures
+  , ExistentialQuantification
+#-}
+
 module Architecture.Internal.Cmd
     ( runCmds
     , batch
@@ -34,6 +40,9 @@ import Control.Concurrent.STM
     , writeTVar
     , modifyTVar
     )
+import Squeal.PostgreSQL (SchemasType, Connection)
+import Squeal.PostgreSQL.Pool (Pool, PoolPQ (runPoolPQ))
+import Generics.SOP (K (..))
 
 import Network.KRPC.Types (CompactInfo (CompactInfo))
 import Architecture.Internal.Network (openUDPPort, ciToAddr, connectTCP)
@@ -47,20 +56,21 @@ import Architecture.Internal.Types
     )
 
 execTCmd
-    :: Map Int (CmdQ, a, ThreadId) -- writeThreadS
-    -> TQueue (TCmd msg)           -- cmdSink
+    :: TVar (Map Int (CmdQ, a, ThreadId)) -- writeThreadS
+    -> TQueue (TCmd msg)                  -- cmdSink
+    -> Maybe (Pool (K Connection (schemas :: SchemasType)))
     -> TCmd msg
     -> IO (Maybe msg)
-execTCmd _ _ (CmdGetRandom f) =
+execTCmd _ _ _ (CmdGetRandom f) =
     randomIO >>= \i -> return (Just $ f i)
 
-execTCmd _ _(CmdGetTime f) =
+execTCmd _ _ _ (CmdGetTime f) =
     getPOSIXTime >>= \t -> return (Just $ f t)
 
-execTCmd _ _ (CmdLog msg) =
+execTCmd _ _ _ (CmdLog msg) =
     putStr msg >> hFlush stdout >> return (Nothing)
 
-execTCmd _ _ (CmdRandomBytes n f) =
+execTCmd _ _ _ (CmdRandomBytes n f) =
     do
         g <- newGenIO :: IO CtrDRBG
 
@@ -69,49 +79,58 @@ execTCmd _ _ (CmdRandomBytes n f) =
             Right (result, _) -> return (Just (f result))
 
 
-execTCmd _ _ (CmdReadFile filename f) =
+execTCmd _ _ _ (CmdReadFile filename f) =
     do
         bytes <- BS.readFile filename
         return (Just $ f bytes)
 
 
-execTCmd _ _ (CmdWriteFile filename bs) =
+execTCmd _ _ _ (CmdWriteFile filename bs) =
     do
         BS.writeFile filename bs
         return (Nothing)
 
 
-execTCmd _ _ (CmdSendUDP _ (CompactInfo ip 0) _) =
-    execTCmd undefined undefined $ CmdLog msg
+execTCmd _ _ _ (CmdSendUDP _ (CompactInfo ip 0) _) =
+    execTCmd undefined undefined undefined $ CmdLog msg
 
     where
         msg = "Error: Cannot send message to " ++ show (CompactInfo ip 0)
             ++ ". Invalid port 0!"
 
-execTCmd wrT sink cmd = sinkTCmd wrT sink cmd
+execTCmd _ _ (Just pool) (CmdDatabase session handler) =
+    runPoolPQ session pool >>= return . Just . handler
+
+execTCmd _ _ Nothing (CmdDatabase _ _) = undefined
+
+execTCmd wrT sink _ cmd = atomically $ sinkTCmd wrT sink cmd >> return Nothing
 
 
 execCmd
-    :: Map Int (CmdQ, a, ThreadId)
+    :: TVar (Map Int (CmdQ, a, ThreadId))
     -> TQueue (TCmd msg)
+    -> Maybe (Pool (K Connection (schemas :: SchemasType)))
     -> Cmd msg
     -> IO ([ msg ])
-execCmd wrT sink (Cmd l) = (mapM (execTCmd wrT sink) l) >>= (return . catMaybes)
+execCmd wrT sink mpool (Cmd l) =
+    (mapM (execTCmd wrT sink mpool) l) >>= (return . catMaybes)
 
 
 runCmds
-    :: Map.Map Int (CmdQ, a, ThreadId)
-    -> TQueue (TCmd msg)
+    :: InternalState msg schemas
     -> Program model msg
     -> IO ()
-runCmds writeS sink cfg = do
-    (msgs) <- execCmd writeS sink cmd
+runCmds istate cfg = do
+    msgs <- execCmd (writeThreadS istate)
+                    (cmdSink istate)
+                    (dbPool istate)
+                    cmd
 
     case msgs of
         [] -> return ()
         _ -> do
             cmds <- atomically $ foldMsgsStm (update cfg) msgs tmodel
-            runCmds writeS sink (cfg { init = (tmodel, cmds) })
+            runCmds istate (cfg { init = (tmodel, cmds) })
 
     where
         (tmodel, cmd) = init cfg
@@ -192,7 +211,7 @@ updateWriters_ cmd istate getsock getq threadmain initCmdQ = do
     writers <- readTVarIO (writeThreadS istate)
 
     case Map.lookup key writers of
-        (Just (cmdq, _, _)) -> enqueueCmd cmdq cmd >> return istate
+        (Just (cmdq, _, _)) -> atomically $ enqueueCmd cmdq cmd >> return istate
 
         Nothing -> do
             (sock, istate2) <- case Map.lookup key (sockets istate) of
@@ -275,24 +294,22 @@ runMain q quit key qsink sock fsend = do
 
 
 sinkTCmd
-    :: Map Int (CmdQ, a, ThreadId)
+    :: TVar (Map Int (CmdQ, a, ThreadId))
     -> TQueue (TCmd msg)
     -> TCmd msg
-    -> IO (Maybe msg)
-sinkTCmd wrT sink cmd = do
+    -> STM ()
+sinkTCmd writeS sink cmd = do
+    wrT <- readTVar writeS
+
     case Map.lookup (getKey cmd) wrT of
         (Just (cmdq, _, _)) -> enqueueCmd cmdq cmd
-        Nothing -> atomically $ writeTQueue sink cmd
-
-    return Nothing
+        Nothing -> writeTQueue sink cmd
 
 
-enqueueCmd :: CmdQ -> TCmd msg -> IO ()
-enqueueCmd (UDPQueue q) (CmdSendUDP _ ci bs) =
-    atomically (writeTQueue q (ci, bs))
-enqueueCmd (TCPQueue q) (CmdSendTCP _ bs) =
-    atomically (writeTQueue q bs)
-enqueueCmd _ _ = undefined
+enqueueCmd :: CmdQ -> TCmd msg -> STM ()
+enqueueCmd (UDPQueue q) (CmdSendUDP _ ci bs) = writeTQueue q (ci, bs)
+enqueueCmd (TCPQueue q) (CmdSendTCP _ bs)    = writeTQueue q bs
+enqueueCmd _            _                    = undefined
 
 
 foldMsgs

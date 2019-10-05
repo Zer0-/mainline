@@ -12,12 +12,15 @@ module Architecture.Cmd
     , getTime
     , readFile
     , writeFile
+    , db
     ) where
 
 import Prelude hiding (log, print, readFile, writeFile)
 import Data.List (intercalate)
 import Data.ByteString (ByteString)
 import Data.Time.Clock.POSIX (POSIXTime)
+import Squeal.PostgreSQL.Pool (PoolPQ)
+
 import Architecture.Internal.Cmd (batch) -- for export only
 
 import Network.KRPC.Types
@@ -74,3 +77,7 @@ readFile filename f = Cmd [ CmdReadFile filename f ]
 
 writeFile :: String -> ByteString -> Cmd msg
 writeFile filename bs = Cmd [ CmdWriteFile filename bs ]
+
+
+db :: PoolPQ schema IO result -> (result -> msg) -> Cmd msg
+db schema f = Cmd [ CmdDatabase schema f ]
