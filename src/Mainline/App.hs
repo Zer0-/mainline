@@ -26,7 +26,7 @@ import Network.KRPC.Types
     , CompactInfo (..)
     )
 import Mainline.RoutingTable (RoutingTable (..))
-import qualified Mainline.SQL
+import Mainline.SQL (runSetup);
 
 -- Number of nodes on this port
 nMplex :: Int
@@ -42,7 +42,7 @@ data Model = Model
     }
 
 main :: IO ()
-main = simpleApp init update subscriptions
+main = runSetup >> simpleApp init update subscriptions
 
 init :: (Model, Cmd M.Msg)
 init =

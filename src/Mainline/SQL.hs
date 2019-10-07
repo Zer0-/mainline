@@ -7,6 +7,7 @@
 
 module Mainline.SQL
     ( Schemas
+    , runSetup
     ) where
 
 import Generics.SOP (NP (..))
@@ -128,8 +129,8 @@ setup =
 connstr :: ByteString
 connstr = "host=192.168.4.2 dbname=test user=guest password=invisiblegiraffe"
 
-main :: IO ()
-main = withConnection connstr $
+runSetup :: IO ()
+runSetup = withConnection connstr $
     define setup
 
 
