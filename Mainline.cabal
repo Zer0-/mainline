@@ -114,6 +114,7 @@ executable Mainline
                    Mainline.Bucket
                    Mainline.RoutingTable
                    Mainline.Mainline
+                   Mainline.SQL
                    Network.KRPC
                    Network.KRPC.Helpers
                    Network.KRPC.InternalConstants

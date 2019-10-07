@@ -1,12 +1,16 @@
 {-# LANGUAGE
     DataKinds
   , TypeOperators
+  , OverloadedLabels
+  , OverloadedStrings
 #-}
 
 module Mainline.SQL
     ( Schemas
     ) where
 
+import Generics.SOP (NP (..))
+import Data.ByteString (ByteString)
 import Squeal.PostgreSQL
     ( Public
     , SchemumType (..)
@@ -16,6 +20,32 @@ import Squeal.PostgreSQL
     , ColumnConstraint (..)
     , NullityType (..)
     , PGType (..)
+    , Definition
+    , createTableIfNotExists
+    , as
+    , serial
+    , bytea
+    , timestampWithTimeZone
+    , notNullable
+    , default_
+    , currentTimestamp
+    , doublePrecision
+    , check
+    , unique
+    , primaryKey
+    , length_
+    , (.==)
+    , (&)
+    , (>>>)
+    , integer
+    , vararray
+    , text
+    , foreignKey
+    , OnDeleteClause (..)
+    , OnUpdateClause (..)
+    , rem_
+    , withConnection
+    , define
     )
 
 type Schemas = Public Schema
@@ -40,7 +70,7 @@ type MetaInfoColumns =
     ]
 
 type FileInfoConstraints =
-    '[ "file_pk" ::: 'PrimaryKey '["info_id"]
+    '[ "file_pk" ::: 'PrimaryKey '["info_id", "filepath"]
     ,  "file_fk" ::: 'ForeignKey '["info_id"] "meta_info" '["info_id"]
     ]
 
@@ -61,11 +91,55 @@ type InfoPiecesColumns =
     ,  "pieces"  ::: 'NoDef :=> 'NotNull 'PGbytea
     ]
 
+setup :: Definition Schemas Schemas
+setup =
+    createTableIfNotExists #meta_info
+        (  serial `as` #info_id
+        :* ( bytea & notNullable ) `as` #info_hash
+        :* ( timestampWithTimeZone
+                & notNullable & default_ currentTimestamp ) `as` #added
+        :* ( doublePrecision & notNullable & default_ 0 ) `as` #score
+        )
+        ( check #info_hash (length_ #info_hash .== 20) `as` #hash_len
+        :* primaryKey #info_id `as` #info_pk
+        :* unique #info_hash `as` #info_hash_unique
+        ) >>>
+
+    createTableIfNotExists #file_info
+        (  (integer & notNullable) `as` #info_id
+        :* ( vararray text & notNullable )`as` #filepath
+        :* ( integer & notNullable ) `as` #size_bytes
+        )
+        (  primaryKey (#info_id :* #filepath) `as` #file_pk
+        :* foreignKey #info_id #meta_info #info_id
+            OnDeleteCascade OnUpdateNoAction `as` #file_fk
+        ) >>>
+
+    createTableIfNotExists #info_pieces
+        (  (integer & notNullable) `as` #info_id
+        :* (bytea & notNullable) `as` #pieces
+        )
+        (  check #pieces (length_ #pieces `rem_` 20 .== 0) `as` #pieces_divisible
+        :* primaryKey #info_id `as` #pieces_pk
+        :* foreignKey #info_id #meta_info #info_id
+            OnDeleteCascade OnUpdateNoAction `as` #pieces_fk
+        )
+
+connstr :: ByteString
+connstr = "host=192.168.4.2 dbname=test user=guest password=invisiblegiraffe"
+
+main :: IO ()
+main = withConnection connstr $
+    define setup
+
+
 -- How to execute definitions using a Connection from Pool?
+--
 -- define :: Definition schemas0 schemas1 -> pq schemas0 schemas1 io ()
 -- liftPQ :: (Connection -> IO a) -> pq q
 --
 -- if we use define we get a PQ
+--
 -- instance IndexedMonadTransPQ PQ where
 --      define :: Definition schemas0 schemas1 -> PQ schemas0 schemas1 io ()
 --
@@ -76,4 +150,3 @@ type InfoPiecesColumns =
 -- need action con =
 --      (((unPQ action) :: K Connection schemas0 -> m (K x schemas1)) (K con)) >>
 --      return ()
--- need = ((unPQ `s` K) :: PQ schemas0 schemas1 io () -> Connection -> m (K x schemas1))

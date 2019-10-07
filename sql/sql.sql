@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS file_info
 
 CREATE TABLE IF NOT EXISTS info_pieces
     ( info_id integer
-    , pieces bytea
+    , pieces bytea NOT NULL
     , CONSTRAINT pieces_divisible CHECK (length(pieces) % 20 = 0)
     , CONSTRAINT pieces_pk PRIMARY KEY (info_id)
     , CONSTRAINT pieces_fk FOREIGN KEY (info_id) REFERENCES meta_info (info_id) ON DELETE CASCADE
