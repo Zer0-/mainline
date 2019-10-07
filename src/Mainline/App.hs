@@ -26,6 +26,7 @@ import Network.KRPC.Types
     , CompactInfo (..)
     )
 import Mainline.RoutingTable (RoutingTable (..))
+import qualified Mainline.SQL
 
 -- Number of nodes on this port
 nMplex :: Int

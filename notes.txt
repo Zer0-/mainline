@@ -15,47 +15,6 @@
     - pausing xterm scrolling leaves cpu at 8%!
 
 
-
-
-Plan
-====
-
-- Host nodes on multiple ports
-- Resolve info_hashes and start collecting data
-    - ask the database if it has the info_hash first
-        - connect to pg
-        - init pg table(s)
-        - query and write rows
-            - full text search column
-    - initiate GetPeers for info hash
-    - propagate subs and cmds from ResolveMagnet
-        - probably should add support for multiple peers there
-
-
-DB stuff
---------
-
-- Where to keep open connection pool?
-    - writeThreadS entry of (TQueue DBSession, TVar Bool, ThreadId)
-        - ignore quit flag?
-
-    - write thread needs persistent state?
-
-- Cmd interface?
-    - Cmd.db :: Session -> Cmd msg
-
-- DB metadata table
-    - info_hash (PK)
-    - name
-    - time added
-    - file list?
-    - File table ?
-        - name
-        - path
-        - size
-        - part of metadata
-    - search index
-
 Maybe
 -----
 
@@ -67,23 +26,6 @@ Then we have Network.{Mainline, KRPC, Bittorrent}
 
 Priority
 --------
-
-- What is the database interface for our TEA style framework?
-    - We need a connection string from the lib user
-        - Should this be passed to run via Config? Or should this be passed
-            - ConfigWithDB model msg schemas, runwdb
-            - rename Config to Program?
-            - Cons of this are that we cannot issue Cmds to get the connection string dynamically
-            - There is only one allowed db pool however, so only one database can be used at a time.
-                Given that we've accepted this limitation maybe it's ok to pass
-                the connection string at the beggining.
-        - on a per-command basis?
-            - Cons of this are passing the same string each time we run a cmd
-    - Need a query
-    - Need a session (which probably tells squeal how to get the result)
-
-- Actually we first just need to query our db for an infohash to see if we should get
-  the metainfo for it. How is that so hard?
 
 Misc
 ----
