@@ -1,4 +1,4 @@
-{-# LANGUAGE NamedFieldPuns, DataKinds #-}
+{-# LANGUAGE NamedFieldPuns #-}
 
 module Mainline.Mainline
     ( Model (..)
@@ -57,8 +57,9 @@ import Network.KRPC.Types
     , ResponseDat (..)
     , NodeInfo    (..)
     )
+import Mainline.SQL (Schemas);
 
-type Cmd msg = Cmd.Cmd msg '[]
+type Cmd msg = Cmd.Cmd msg Schemas
 
 {-
  - TODO:
@@ -140,7 +141,6 @@ data Msg
         , body          :: Message
         , tid           :: ByteString
         }
-    | ProcessQueue POSIXTime
     | TimeoutTransactions POSIXTime
     | MaintainPeers POSIXTime
 
@@ -536,7 +536,6 @@ update (SendMessage {}) Uninitialized = undefined
 update (SendMessage {}) (Uninitialized1 _ _) = undefined
 update (SendResponse {}) Uninitialized = undefined
 update (SendResponse {}) (Uninitialized1 _ _) = undefined
-update (ProcessQueue _) _ = undefined
 
 {-
 subscriptions :: Model -> Sub Msg

@@ -40,7 +40,7 @@ data TCmd msg schemas
     | CmdReadFile String (BS.ByteString -> msg)
     | CmdWriteFile String BS.ByteString
     | forall result.
-        CmdDatabase (PoolPQ schemas IO result) (result -> msg)
+        CmdDatabase (PoolPQ schemas IO result) (Maybe (result -> msg))
     | QuitW Int
 
 

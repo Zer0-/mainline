@@ -40,7 +40,7 @@ update :: Msg -> Model -> (Model, Cmd.Cmd Msg EmptySchema)
 update (Increment i) n = (n, Cmd.batch [ cmdlog, dbcmd ])
     where
         cmdlog = Cmd.log Cmd.DEBUG [ show n, show i, show $ n + i ]
-        dbcmd = Cmd.db (session i) PGResult
+        dbcmd = Cmd.db (session i) (Just PGResult)
 
 update (PGResult ii) n = (n + ii, cmdlog)
     where

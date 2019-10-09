@@ -13,6 +13,7 @@ module Architecture.Cmd
     , readFile
     , writeFile
     , db
+    , up
     ) where
 
 import Prelude hiding (log, print, readFile, writeFile)
@@ -79,5 +80,21 @@ writeFile :: String -> ByteString -> Cmd msg schemas
 writeFile filename bs = Cmd [ CmdWriteFile filename bs ]
 
 
-db :: PoolPQ schemas IO result -> (result -> msg) -> Cmd msg schemas
+db :: PoolPQ schemas IO result -> Maybe (result -> msg) -> Cmd msg schemas
 db schemas f = Cmd [ CmdDatabase schemas f ]
+
+mapTCmd :: (msg0 -> msg1) -> TCmd msg0 schemas -> TCmd msg1 schemas
+mapTCmd _ (CmdLog a) = CmdLog a
+mapTCmd f (CmdGetRandom h) = CmdGetRandom (f . h)
+mapTCmd f (CmdGetTime h) = CmdGetTime (f . h)
+mapTCmd f (CmdRandomBytes n h) = CmdRandomBytes n (f . h)
+mapTCmd _ (CmdSendUDP p ci bs) = CmdSendUDP p ci bs
+mapTCmd _ (CmdSendTCP ci bs) = CmdSendTCP ci bs
+mapTCmd f (CmdReadFile p h) = CmdReadFile p (f . h)
+mapTCmd _ (CmdWriteFile p bs) = CmdWriteFile p bs
+mapTCmd f (CmdDatabase sesh (Just h)) = CmdDatabase sesh (Just $ f . h)
+mapTCmd _ (CmdDatabase sesh Nothing) = CmdDatabase sesh Nothing
+mapTCmd _ (QuitW i) = QuitW i
+
+up :: (msg0 -> msg1) -> Cmd msg0 schemas -> Cmd msg1 schemas
+up f (Cmd xs) = Cmd $ map (mapTCmd f) xs

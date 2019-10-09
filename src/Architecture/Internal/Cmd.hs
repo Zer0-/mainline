@@ -98,8 +98,11 @@ execTCmd _ _ _ (CmdSendUDP _ (CompactInfo ip 0) _) =
         msg = "Error: Cannot send message to " ++ show (CompactInfo ip 0)
             ++ ". Invalid port 0!"
 
-execTCmd _ _ (Just pool) (CmdDatabase session handler) =
+execTCmd _ _ (Just pool) (CmdDatabase session (Just handler)) =
     runPoolPQ session pool >>= return . Just . handler
+
+execTCmd _ _ (Just pool) (CmdDatabase session Nothing) =
+    runPoolPQ session pool >> return Nothing
 
 execTCmd _ _ Nothing (CmdDatabase _ _) = undefined
 
