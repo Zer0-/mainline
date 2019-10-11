@@ -41,6 +41,7 @@ data TCmd msg schemas
     | CmdWriteFile String BS.ByteString
     | forall result.
         CmdDatabase (PoolPQ schemas IO result) (Maybe (result -> msg))
+    | CmdBounce msg
     | QuitW Int
 
 

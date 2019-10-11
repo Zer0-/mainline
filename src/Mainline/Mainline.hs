@@ -5,6 +5,7 @@ module Mainline.Mainline
     , Msg (..)
     , ServerState (..)
     , ServerConfig (..)
+    , Action (..)
     , Cmd
     , update
     , parseReceivedBytes
@@ -13,6 +14,7 @@ module Mainline.Mainline
     , logHelper
     , logErr
     , getMTstate
+    , tidsize
     ) where
 
 
@@ -47,6 +49,7 @@ import Mainline.RoutingTable
     , questionable
     , remove
     , updateTime
+    , orderingf
     )
 import Network.KRPC.Types
     ( Port
@@ -56,6 +59,7 @@ import Network.KRPC.Types
     , QueryDat    (..)
     , ResponseDat (..)
     , NodeInfo    (..)
+    , InfoHash
     )
 import Mainline.SQL (Schemas);
 
@@ -143,6 +147,7 @@ data Msg
         }
     | TimeoutTransactions POSIXTime
     | MaintainPeers POSIXTime
+    | PeersFoundResult InfoHash [CompactInfo]
 
 data ServerState = ServerState
     { transactions :: Transactions
@@ -165,7 +170,11 @@ data TransactionState = TransactionState
 
 type Transactions = Map.Map NodeID (Map.Map ByteString TransactionState)
 
-data Action = Warmup | KeepAlive deriving Eq
+data Action
+    = Warmup
+    | KeepAlive
+    | GettingPeers InfoHash
+    deriving Eq
 
 
 {-
@@ -309,8 +318,8 @@ update
                 (\newid -> SendMessage
                     { idx        = index conf
                     , sendAction = Warmup
-                    , targetNode = (NodeInfo nodeid client)
-                    , body       = (Query ourid (FindNode ourid))
+                    , targetNode = NodeInfo nodeid client
+                    , body       = Query ourid (FindNode ourid)
                     , newtid     = newid
                     , when       = now
                     }
@@ -536,6 +545,7 @@ update (SendMessage {}) Uninitialized = undefined
 update (SendMessage {}) (Uninitialized1 _ _) = undefined
 update (SendResponse {}) Uninitialized = undefined
 update (SendResponse {}) (Uninitialized1 _ _) = undefined
+update (PeersFoundResult _ _) _ = undefined
 
 {-
 subscriptions :: Model -> Sub Msg
@@ -693,16 +703,59 @@ handleResponse
 
             initialRt = routingTable state
 
-            cmds = Cmd.batch $ [ logmsg ] ++ sendCmds
+            cmds = Cmd.batch $ logmsg : sendCmds
 
             (newstate, sendCmds) =
                 foldl
-                    ( \(rt_, l) nodeinfo ->
-                        (\(rt__, cmd) -> (rt__, l ++ [cmd]))
-                        (considerNode now rt_ nodeinfo)
+                    ( \(s, l) nodeinfo ->
+                        (\(s_, cmd) -> (s_, l ++ [cmd]))
+                        (considerNode now s nodeinfo)
                     )
                     (state { routingTable = rt }, [])
                     (filter filterNodes (fromAscList ninfos))
+
+
+-- Respond to GetPeers Nodes Response when looking for peers
+handleResponse
+    respondingNode
+    (TransactionState _ (GettingPeers infohash) _)
+    now
+    (NodesFound _ nodes)
+    state = (state, Cmd.batch $ map mksend closer)
+        where
+            closer = L.filter
+                ( \n ->
+                    ( (== GT)
+                    . (orderingf infohash (nodeId respondingNode))
+                    . nodeId
+                    ) n && filterNodes n
+                )
+                nodes
+
+            mksend node = Cmd.randomBytes tidsize
+                (\newid -> SendMessage
+                    { idx = index config
+                    , sendAction = GettingPeers infohash
+                    , targetNode = node
+                    , body       = Query (ourId config) (GetPeers infohash)
+                    , newtid     = newid
+                    , when       = now
+                    }
+                )
+
+            config = conf state
+
+        -- for every node in nodes that is closer to infohash than respondingNode
+        -- make a SendMessage command to query them with GetPeers.
+        -- also consider that node for addition? (extra)
+
+
+handleResponse
+    _
+    (TransactionState _ (GettingPeers infohash) _)
+    _
+    (PeersFound _ peers)
+    state = (state, Cmd.bounce (PeersFoundResult infohash peers))
 
 -- Ignore the rest for now
 handleResponse

@@ -27,7 +27,7 @@ import Network.KRPC.Types
     , CompactInfo (..)
     )
 import Network.Octets (octToByteString)
-import Mainline.RoutingTable (RoutingTable (..))
+import Mainline.RoutingTable (RoutingTable (..), nclosest)
 import Mainline.SQL (Schemas);
 import qualified Mainline.SQL as SQL
 
@@ -51,7 +51,7 @@ data Model = Model
 data MMsg
     = MMsg M.Msg
     | ProcessQueue POSIXTime
-    | DBHasInfo Integer Int Bool
+    | DBHasInfo POSIXTime Integer Int Bool
 
 main :: IO ()
 main = SQL.runSetup >> dbApp init update subscriptions SQL.connstr
@@ -70,7 +70,7 @@ init =
 subscriptions :: Model -> Sub MMsg
 subscriptions mm
     | indices m == [] = Sub.none
-    | isUn (m!0) = Sub.none
+    | isUn (m ! 0) = Sub.none
     | otherwise = Sub.batch
         [ Sub.udp M.servePort (\ci r -> MMsg $ M.parseReceivedBytes ci r)
         , Sub.timer 100 ProcessQueue
@@ -97,7 +97,7 @@ update
         )
     ))
     mm
-    | null havet = liftResult $ M.logHelper
+    | null havet = adaptResult $ M.logHelper
         (NodeInfo nodeid ci)
         (Response nodeid r)
         "Ignoring a response that wasn't in our transaction state from"
@@ -142,7 +142,7 @@ update
         q = AnnouncePeer impliedPort infohash port token mname
         idx = queryToIndex (Query nodeid q) mm
         (model, cmds) = updateExplicit msg mm idx
-        (_, mHaveInfo) = lookup infohash cachedInfos
+        (_, mHaveInfo) = lookup infohash cached
 
         (newHaves, cmds2) =
             case mHaveInfo of
@@ -150,15 +150,19 @@ update
                     if t - created > fromIntegral scoreAggregateSeconds
                     then (newCacheEntry, incrementScore (n + 1))
                     else
-                        ( insert infohash (created, n + 1) cachedInfos
+                        ( insert infohash (created, n + 1) cached
                         , Cmd.none
                         )
 
-                Nothing -> (newCacheEntry, checkdb)
+                Nothing ->
+                    -- TODO: also check ongoing info downloads,
+                    -- after info download is complete remember to add a new
+                    -- entry into cached.
+                    (cached, checkdb)
 
-        newCacheEntry = insert infohash (t, 1) cachedInfos
+        newCacheEntry = insert infohash (t, 1) cached
 
-        cachedInfos = haves mm
+        cached = haves mm
 
         --incrementScore score = Cmd.db session? Nothing
         incrementScore = undefined
@@ -166,12 +170,49 @@ update
         checkdb =
             Cmd.db
                 (SQL.queryExists (octToByteString infohash))
-                (Just $ DBHasInfo infohash idx)
+                (Just $ DBHasInfo t infohash idx)
 
 
-update (DBHasInfo _ _ True) model = (model, Cmd.none)
-update (DBHasInfo infohash idx False) model = (model, Cmd.none)
+update (DBHasInfo t infohash _ True) model = (model { haves = newHaves }, Cmd.none)
+    where
+        cached = haves model
+        (_, mHaveInfo) = lookup infohash cached
+        newHaves = case mHaveInfo of
+            Just (created, n) -> insert infohash (created, n + 1) cached
+            Nothing -> insert infohash (t, 1) cached
 
+update (DBHasInfo t infohash ix False) model
+    | isReady mm =
+        ( model
+        , Cmd.randomBytes M.tidsize
+            (\newid -> MMsg $ SendMessage
+                { idx        = ix
+                , sendAction = M.GettingPeers infohash
+                , targetNode = target
+                , body       = Query ourid (GetPeers infohash)
+                , newtid     = newid
+                , when       = t
+                }
+            )
+        )
+    | otherwise = (model, Cmd.none)
+
+        where
+            target = head $ nclosest infohash 1 (M.routingTable state)
+
+            ourid = M.ourId $ M.conf state
+
+            state = getServerState mm
+
+            mm = (models model) ! ix
+
+            isReady :: M.Model -> Bool
+            isReady (M.Ready _) = True
+            isReady _ = False
+
+            getServerState :: M.Model -> M.ServerState
+            getServerState (M.Ready m) = m
+            getServerState _ = undefined
 
 update
     ( MMsg ( Inbound t ci
@@ -188,7 +229,7 @@ update
         msg = Inbound t ci (KPacket transactionId (Query nodeid q) v)
 
 update (MMsg (Inbound _ ci ( KPacket { message }))) m =
-    liftResult $ M.logErr ci message m
+    adaptResult $ M.logErr ci message m
 
 update (MMsg (SendFirstMessage { idx, sendRecipient, body, newtid })) m =
     sendOrQueue
@@ -276,8 +317,6 @@ queryToIndex
 
 queryToIndex _ _ = undefined
 
--- Need! Cmd.up :: Cmd msg schemas0 -> (msg -> mmsg) -> Cmd mmsg
-
 updateExplicit :: Msg -> Model -> Int -> (Model, Cmd MMsg Schemas)
 updateExplicit msg model ix =
     ( model { models = m // [(ix, mm)] }
@@ -286,7 +325,7 @@ updateExplicit msg model ix =
 
     where
         m = models model
-        (mm, cmds) = M.update msg (m!ix)
+        (mm, cmds) = M.update msg (m ! ix)
 
 propagateTimer :: Msg -> Model -> (Model, Cmd MMsg Schemas)
 propagateTimer msg m = (m { models = models2 }, cmds)
@@ -334,8 +373,8 @@ throttle cache key now cps =
 hashci :: CompactInfo -> Int
 hashci (CompactInfo ip port) = hashWithSalt (hash ip) port
 
-liftResult :: (a, Cmd Msg schemas) -> (a, Cmd MMsg schemas)
-liftResult (model, cmd) = (model, Cmd.up MMsg cmd)
+adaptResult :: (a, Cmd Msg schemas) -> (a, Cmd MMsg schemas)
+adaptResult (model, cmd) = (model, Cmd.up MMsg cmd)
 
 e :: Integer -> Integer -> Integer
 e = (^)

@@ -106,6 +106,8 @@ execTCmd _ _ (Just pool) (CmdDatabase session Nothing) =
 
 execTCmd _ _ Nothing (CmdDatabase _ _) = undefined
 
+execTCmd _ _ _ (CmdBounce m) = return (Just m)
+
 execTCmd wrT sink _ cmd = atomically $ sinkTCmd wrT sink cmd >> return Nothing
 
 

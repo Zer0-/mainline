@@ -12,6 +12,7 @@ module Mainline.RoutingTable
     , questionable
     , remove
     , updateTime
+    , orderingf
     ) where
 
 import qualified Data.Map as Map
@@ -94,15 +95,18 @@ getOwnId = getId . bucket
 nclosest :: NodeID -> Int -> RoutingTable -> [NodeInfo]
 nclosest nid n rt = map info $ take n $ sortBy f $ Map.elems $ nodes rt
     where
-        f = g `on` getid
-
-        g i j
-            | i == j                    = EQ
-            | nid `xor` i < nid `xor` j = LT
-            | otherwise                 = GT
-
+        f = (orderingf nid) `on` getid
 
         getid = (nodeId . info)
+
+
+orderingf :: Integer -> Integer -> Integer -> Ordering
+orderingf target = f
+    where
+        f i j
+            | i == j                          = EQ
+            | target `xor` i < target `xor` j = LT
+            | otherwise                       = GT
 
 
 questionable :: RoutingTable -> POSIXTime -> [ Node ]

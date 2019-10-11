@@ -14,6 +14,7 @@ module Architecture.Cmd
     , writeFile
     , db
     , up
+    , bounce
     ) where
 
 import Prelude hiding (log, print, readFile, writeFile)
@@ -94,7 +95,11 @@ mapTCmd f (CmdReadFile p h) = CmdReadFile p (f . h)
 mapTCmd _ (CmdWriteFile p bs) = CmdWriteFile p bs
 mapTCmd f (CmdDatabase sesh (Just h)) = CmdDatabase sesh (Just $ f . h)
 mapTCmd _ (CmdDatabase sesh Nothing) = CmdDatabase sesh Nothing
+mapTCmd f (CmdBounce m) = CmdBounce (f m)
 mapTCmd _ (QuitW i) = QuitW i
 
 up :: (msg0 -> msg1) -> Cmd msg0 schemas -> Cmd msg1 schemas
 up f (Cmd xs) = Cmd $ map (mapTCmd f) xs
+
+bounce :: msg -> Cmd msg schemas
+bounce m = Cmd [ CmdBounce m ]
