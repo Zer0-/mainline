@@ -147,7 +147,7 @@ data Msg
         }
     | TimeoutTransactions POSIXTime
     | MaintainPeers POSIXTime
-    | PeersFoundResult InfoHash [CompactInfo]
+    | PeersFoundResult NodeID InfoHash [CompactInfo]
 
 data ServerState = ServerState
     { transactions :: Transactions
@@ -545,7 +545,7 @@ update (SendMessage {}) Uninitialized = undefined
 update (SendMessage {}) (Uninitialized1 _ _) = undefined
 update (SendResponse {}) Uninitialized = undefined
 update (SendResponse {}) (Uninitialized1 _ _) = undefined
-update (PeersFoundResult _ _) _ = undefined
+update (PeersFoundResult _ _ _) _ = undefined
 
 {-
 subscriptions :: Model -> Sub Msg
@@ -755,7 +755,10 @@ handleResponse
     (TransactionState _ (GettingPeers infohash) _)
     _
     (PeersFound _ peers)
-    state = (state, Cmd.bounce (PeersFoundResult infohash peers))
+    state = (state, Cmd.bounce (PeersFoundResult ourid infohash peers))
+
+        where
+            ourid = ourId $ conf $ state
 
 -- Ignore the rest for now
 handleResponse

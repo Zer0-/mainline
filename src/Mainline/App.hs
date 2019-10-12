@@ -12,22 +12,23 @@ import Data.Cache.LRU (LRU, newLRU, lookup, insert)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (hashWithSalt, hash)
 
-import Architecture.Cmd (Cmd)
 import qualified Architecture.Cmd as Cmd
 import Architecture.TEA (dbApp)
 import Architecture.Sub (Sub)
 import qualified Architecture.Sub as Sub
 import qualified Mainline.Mainline as M
-import Mainline.Mainline (Msg (..))
+import Mainline.Mainline (Msg (..), Cmd)
 import Network.KRPC (KPacket (..))
 import Network.KRPC.Types
     ( Message     (..)
     , NodeInfo    (..)
     , QueryDat    (..)
     , CompactInfo (..)
+    , InfoHash
     )
 import Network.Octets (octToByteString)
 import Mainline.RoutingTable (RoutingTable (..), nclosest)
+import Mainline.ResolveMagnet as R
 import Mainline.SQL (Schemas);
 import qualified Mainline.SQL as SQL
 
@@ -42,27 +43,30 @@ scoreAggregateSeconds :: Int
 scoreAggregateSeconds = 60
 
 data Model = Model
-    { models :: Array Int M.Model
-    , tcache :: LRU Int POSIXTime
-    , haves  :: LRU Integer (POSIXTime, Int) -- (last cleared/first detected, counter)
-    , queue :: [(Int, Int, M.Msg)] -- WARN: unbounded
+    { models  :: Array Int M.Model
+    , tcache  :: LRU Int POSIXTime
+    , haves   :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
+    , queue   :: [(Int, Int, M.Msg)] -- WARN: unbounded
+    , metadls :: Map InfoHash (R.Model, Map CompactInfo R.Model)
     }
 
 data MMsg
     = MMsg M.Msg
+    | RMsg R.Msg
     | ProcessQueue POSIXTime
     | DBHasInfo POSIXTime Integer Int Bool
 
 main :: IO ()
 main = SQL.runSetup >> dbApp init update subscriptions SQL.connstr
 
-init :: (Model, Cmd MMsg Schemas)
+init :: (Model, Cmd MMsg)
 init =
     ( Model
         { models = listArray (0, nMplex - 1) (replicate nMplex M.Uninitialized)
         , tcache = newLRU (Just $ fromIntegral $ nMplex * 10)
         , haves = newLRU (Just $ fromIntegral $ nMplex * 10)
         , queue = []
+        , metadls = Map.empty
         }
     , Cmd.batch [(Cmd.randomBytes 20 (MMsg . NewNodeId i)) | i <- [0..nMplex-1]]
     )
@@ -83,7 +87,7 @@ subscriptions mm
             isUn (M.Uninitialized) = True
             isUn _ = False
 
-update :: MMsg -> Model -> (Model, Cmd MMsg Schemas)
+update :: MMsg -> Model -> (Model, Cmd MMsg)
 update (MMsg (NewNodeId ix bs)) m = updateExplicit (NewNodeId ix bs) m ix
 update (MMsg (ErrorParsing ci bs err)) m =
     (m, Cmd.up MMsg $ M.onParsingErr M.servePort ci bs err)
@@ -173,13 +177,15 @@ update
                 (Just $ DBHasInfo t infohash idx)
 
 
-update (DBHasInfo t infohash _ True) model = (model { haves = newHaves }, Cmd.none)
+update (DBHasInfo t infohash _ True) model =
+    (model { haves = newHaves }, Cmd.none)
     where
         cached = haves model
         (_, mHaveInfo) = lookup infohash cached
         newHaves = case mHaveInfo of
             Just (created, n) -> insert infohash (created, n + 1) cached
             Nothing -> insert infohash (t, 1) cached
+
 
 update (DBHasInfo t infohash ix False) model
     | isReady mm =
@@ -278,6 +284,39 @@ update (MMsg (TimeoutTransactions now)) m =
 update (MMsg (MaintainPeers now)) m =
     propagateTimer (MaintainPeers now) m
 
+update (MMsg (PeersFoundResult nodeid infohash peers)) model
+    | Map.member infohash dls =
+        ( model { metadls = existingMdls `Map.union` initialMdls }
+        , Cmd.up RMsg newcmds
+        )
+    | otherwise =
+        ( model { metadls = Map.insert infohash (R.Off, initial) dls }
+        , Cmd.up RMsg (Cmd.batch cmds)
+        )
+
+    where
+        cmds = map snd inits
+
+        initial = Map.singleton ci initialMdls
+
+        initialMdls = Map.fromList (map (\(ci, (mdl, _)) -> (ci, mdl)) rinfo)
+
+        rinfo :: [(CompactInfo, (R.Model, Cmd R.Msg))]
+        rinfo = zip peers $ inits
+
+        inits = map rinit peers
+
+        rinit ci = R.update (R.DownloadInfo nodeid infohash ci) R.Off
+
+        dls = metadls model
+
+        -- For the case of existing download
+
+        existingMdls :: Map CompactInfo R.Model
+        existingMdls = snd (dls Map.! infohash)
+
+        newcmds = filter ((flip Map.notMember) existingMdls) cmds
+
 
 queryToIndex :: Message -> Model -> Int
 queryToIndex
@@ -317,7 +356,7 @@ queryToIndex
 
 queryToIndex _ _ = undefined
 
-updateExplicit :: Msg -> Model -> Int -> (Model, Cmd MMsg Schemas)
+updateExplicit :: Msg -> Model -> Int -> (Model, Cmd MMsg)
 updateExplicit msg model ix =
     ( model { models = m // [(ix, mm)] }
     , Cmd.up MMsg cmds
@@ -327,7 +366,7 @@ updateExplicit msg model ix =
         m = models model
         (mm, cmds) = M.update msg (m ! ix)
 
-propagateTimer :: Msg -> Model -> (Model, Cmd MMsg Schemas)
+propagateTimer :: Msg -> Model -> (Model, Cmd MMsg)
 propagateTimer msg m = (m { models = models2 }, cmds)
     where
         modelCmds = fmap f (models m)
@@ -342,7 +381,7 @@ sendOrQueue
     -> Msg
     -> Int
     -> Model
-    -> (Model, Cmd MMsg Schemas)
+    -> (Model, Cmd MMsg)
 sendOrQueue result key msg idx m =
     case result of
         (Left cache) ->

@@ -8,6 +8,7 @@ module Architecture.Internal.Cmd
     ( runCmds
     , batch
     , updateWriters
+    , mapTCmd
     ) where
 
 import Prelude hiding (init)
@@ -352,3 +353,18 @@ getKey :: TCmd msg schemas -> Int
 getKey (CmdSendUDP srcPort _ _) = hash $ UDP srcPort undefined
 getKey (CmdSendTCP ci _)        = hash $ TCPClient ci undefined undefined
 getKey _                        = undefined
+
+
+mapTCmd :: (msg0 -> msg1) -> TCmd msg0 schemas -> TCmd msg1 schemas
+mapTCmd _ (CmdLog a) = CmdLog a
+mapTCmd f (CmdGetRandom h) = CmdGetRandom (f . h)
+mapTCmd f (CmdGetTime h) = CmdGetTime (f . h)
+mapTCmd f (CmdRandomBytes n h) = CmdRandomBytes n (f . h)
+mapTCmd _ (CmdSendUDP p ci bs) = CmdSendUDP p ci bs
+mapTCmd _ (CmdSendTCP ci bs) = CmdSendTCP ci bs
+mapTCmd f (CmdReadFile p h) = CmdReadFile p (f . h)
+mapTCmd _ (CmdWriteFile p bs) = CmdWriteFile p bs
+mapTCmd f (CmdDatabase sesh (Just h)) = CmdDatabase sesh (Just $ f . h)
+mapTCmd _ (CmdDatabase sesh Nothing) = CmdDatabase sesh Nothing
+mapTCmd f (CmdBounce m) = CmdBounce (f m)
+mapTCmd _ (QuitW i) = QuitW i

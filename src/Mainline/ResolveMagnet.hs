@@ -1,11 +1,17 @@
 {-# LANGUAGE NamedFieldPuns, DataKinds #-}
 
+module Mainline.ResolveMagnet
+    ( Model (..)
+    , Msg (..)
+    , update
+    , subscriptions
+    ) where
+
 import Prelude hiding (init)
 import Control.Applicative (liftA2)
 import Data.Word (Word8, Word32)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Hex (unhex, hex)
 import Data.Map.Strict (singleton)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -18,27 +24,14 @@ import qualified Network.BitTorrent.Exchange.Message as BT
 import qualified Network.BitTorrent.Address as BT
 import qualified Data.Torrent as BTT
 
-import Network.KRPC.Helpers (stringpack)
-import Network.KRPC.Types (Port, CompactInfo(..))
-import Network.Octets (fromOctets, fromByteString)
+import Network.KRPC.Helpers (stringpack, hexify)
+import Network.KRPC.Types (Port, CompactInfo(..), NodeID, InfoHash)
+import Network.Octets (fromOctets, fromByteString, octToByteString)
 import Architecture.TEA (simpleApp)
 import Architecture.Sub (Sub, Received(..))
 import qualified Architecture.Sub as Sub
 import qualified Architecture.Cmd as Cmd
-
-type Cmd msg = Cmd.Cmd msg '[]
-
-knownNodeHost :: Word32
-knownNodeHost = fromOctets [ 192, 168, 4, 2 ]
-
-knownNodePort :: Port
-knownNodePort = 51413
-
-knownNodeInfo :: CompactInfo
-knownNodeInfo = CompactInfo knownNodeHost knownNodePort
-
-testHash :: String
-testHash = "039945d35fc1751c6bd144f0de7b5a124d09df79"
+import Mainline.Mainline (Cmd)
 
 metadataBlocksize :: Int
 metadataBlocksize = 16384
@@ -55,26 +48,33 @@ data Model
         }
 
 data Msg
-    = NewNodeID ByteString
+    = DownloadInfo NodeID InfoHash CompactInfo
     | GotHandshake (Either String BT.Handshake)
     | Got (Either String BT.Message)
 
-init :: (Model, Cmd Msg)
-init = (Off, Cmd.randomBytes 20 NewNodeID)
 
 update :: Msg -> Model -> (Model, Cmd Msg)
-update (NewNodeID bs) Off = (Handshake, Cmd.batch [ logmsg, sendHandshake ])
+update (DownloadInfo ourid infohash ci) Off =
+    (Handshake, Cmd.batch [ logmsg, sendHandshake ])
+
     where
-        logmsg = Cmd.log Cmd.DEBUG [ "Hello World", show $ hex bs ]
-        sendHandshake = Cmd.sendTCP knownNodeInfo (encode handshake)
+        logmsg = Cmd.log Cmd.DEBUG
+            [ "Downloading information"
+            , show $ hexify $ octToByteString infohash
+            , "from", show ci
+            ]
+
+        sendHandshake = Cmd.sendTCP ci (encode handshake)
+
         handshake = BT.Handshake
             def
             (BT.toCaps [ BT.ExtExtended ])
-            (BTT.InfoHash $ fromJust $ unhex $ stringpack testHash)
-            (BT.PeerId bs)
+            (BTT.InfoHash $ octToByteString infohash)
+            (BT.PeerId $ octToByteString ourid)
 
 update (GotHandshake handshake) Handshake =
     (ExtensionHandshake, Cmd.batch [ logmsg, sendCmd ])
+
     where
         logmsg = Cmd.log Cmd.DEBUG
             [ "Have handshake:", show handshake
@@ -242,6 +242,7 @@ chooseNextBlk lastBlkRequested nblks haveblks =
     else
         if lastBlkRequested >= nblks - 1 || Map.member nxt haveblks
         then Just $
+            -- would it be better to use set complement here?
             head $ filter ((flip Map.notMember) haveblks) [0..nblks - 1]
         else Just nxt
 
@@ -258,5 +259,7 @@ pieceReq msgid i ci =
     (encode (BT.Extended $ BT.EMetadata msgid (BT.MetadataRequest i)))
 
 
+{-
 main :: IO ()
 main = simpleApp init update subscriptions
+-}

@@ -6,7 +6,7 @@ let
 
   bittorrent = pkgs.callPackage ../sources/bittorrent/default.nix {};
 
-  squeal-postgresql = pkgs.callPackage ../squeal/shell.nix {};
+  squeal-postgresql = pkgs.callPackage ../sources/squeal/shell.nix {};
 
   f = { mkDerivation, base, bencoding, bytestring, containers
       , Crypto, HUnit, network, QuickCheck, stdenv, test-framework
