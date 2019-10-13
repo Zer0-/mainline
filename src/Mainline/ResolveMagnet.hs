@@ -5,6 +5,7 @@ module Mainline.ResolveMagnet
     , Msg (..)
     , update
     , subscriptions
+    , chooseNextBlk
     ) where
 
 import Prelude hiding (init)
@@ -46,13 +47,13 @@ data Model
         }
 
 data Msg
-    = DownloadInfo NodeID
-    | GotHandshake (Either String BT.Handshake)
-    | Got (Either String BT.Message)
+    = DownloadInfo NodeID InfoHash CompactInfo
+    | GotHandshake InfoHash CompactInfo (Either String BT.Handshake)
+    | Got Int InfoHash CompactInfo (Either String BT.Message)
 
 
-update :: InfoHash -> CompactInfo -> Msg -> Model -> (Model, Cmd Msg)
-update t ci (DownloadInfo ourid) Off =
+update :: Msg -> Model -> (Model, Cmd Msg)
+update (DownloadInfo ourid t ci) Off =
     (Handshake, Cmd.batch [ logmsg, sendHandshake ])
 
     where
@@ -70,7 +71,7 @@ update t ci (DownloadInfo ourid) Off =
             (BTT.InfoHash $ octToByteString t)
             (BT.PeerId $ octToByteString ourid)
 
-update t ci (GotHandshake handshake) Handshake =
+update (GotHandshake t ci handshake) Handshake =
     (ExtensionHandshake, Cmd.batch [ logmsg, sendCmd ])
 
     where
@@ -93,9 +94,7 @@ update t ci (GotHandshake handshake) Handshake =
         supportedExtensions = BT.ExtendedCaps $ singleton BT.ExtMetadata 1
 
 update
-    t
-    ci
-    ( Got
+    ( Got firstBlk t ci
         ( Right
             ( BT.Extended
                 ( BT.EHandshake
@@ -113,7 +112,7 @@ update
             Nothing -> (Off, errmsg)
             Just (size, msgid) ->
                 ( Downloading size msgid 0 Map.empty
-                , Cmd.batch [ logmsg, mkSendCmd msgid ]
+                , Cmd.batch [ logmsg, pieceReq msgid firstBlk t ci ]
                 )
         where
             errmsg = Cmd.log Cmd.WARNING
@@ -128,12 +127,9 @@ update
                 ]
 
             mExtmMsgId = Map.lookup BT.ExtMetadata (BT.extendedCaps exts)
-            mkSendCmd msgid = pieceReq msgid 0 t ci
 
 update
-    t
-    ci
-    ( Got
+    ( Got _ t ci
         ( Right
             ( BT.Extended
                 ( BT.EMetadata
@@ -155,7 +151,7 @@ update
         }
     ) =
         case nextblk of
-            Nothing -> (Off, logmsgs)
+            Nothing -> (Off, logmsgs) -- TODO: Cmd.bounce some message
             (Just i) ->
                 ( Downloading metadataSize extMetadataMsgid i blocks2
                 , Cmd.batch [ logmsg, pieceReq extMetadataMsgid i t ci ]
@@ -165,9 +161,7 @@ update
             blocks2 :: Map Int ByteString
             blocks2 = Map.insert blk blkbs blocks
 
-            nblks = numBlks metadataSize
-
-            nextblk = chooseNextBlk lastBlkRequested nblks blocks2
+            nextblk = chooseNextBlk metadataSize lastBlkRequested blocks2
 
             logmsg = Cmd.log Cmd.DEBUG
                 [ "got block" , show blk
@@ -180,9 +174,7 @@ update
                 ]
 
 update
-    _
-    _
-    (Got (Right (BT.Available _)))
+    (Got _ _ _ (Right (BT.Available _)))
     (Downloading { metadataSize, extMetadataMsgid, lastBlkRequested, blocks }) =
         ( Downloading
             { metadataSize
@@ -198,7 +190,7 @@ update
                 Cmd.DEBUG
                 [ "Ignoring Available response from server" ]
 
-update _ _ (GotHandshake have) _ = (Off, logmsg)
+update (GotHandshake _ _ have) _ = (Off, logmsg)
     where
         logmsg = Cmd.log
             Cmd.INFO
@@ -206,13 +198,13 @@ update _ _ (GotHandshake have) _ = (Off, logmsg)
             , show have
             ]
 
-update _ _ _ Off = (Off, Cmd.none)
+update _ Off = (Off, Cmd.none)
 
 
 subscriptions :: InfoHash -> CompactInfo -> Model -> Sub Msg
 subscriptions _ _ Off = Sub.none
 subscriptions t ci Handshake =
-    Sub.readTCP t ci numToRead (GotHandshake . decode . bytes)
+    Sub.readTCP t ci numToRead ((GotHandshake t ci) . decode . bytes)
 
     where
         numToRead :: ByteString -> Int
@@ -224,7 +216,9 @@ subscriptions t ci Handshake =
             + 20 -- NodeID
             - BS.length bs
 
-subscriptions t ci _ = Sub.readTCP t ci numToRead (Got . decode . bytes)
+subscriptions t ci _ =
+    Sub.readTCP t ci numToRead ((Got 0 t ci) . decode . bytes)
+
     where
         numToRead :: ByteString -> Int
         numToRead bs
@@ -241,7 +235,7 @@ numBlks size =
     ((fromIntegral size / fromIntegral metadataBlocksize) :: Float)
 
 chooseNextBlk :: Int -> Int -> Map Int a -> Maybe Int
-chooseNextBlk lastBlkRequested nblks haveblks =
+chooseNextBlk metadataSize lastBlkRequested haveblks =
     if Map.size haveblks == nblks then Nothing
     else
         if lastBlkRequested >= nblks - 1 || Map.member nxt haveblks
@@ -252,6 +246,7 @@ chooseNextBlk lastBlkRequested nblks haveblks =
 
     where
         nxt = lastBlkRequested + 1
+        nblks = numBlks metadataSize
 
 combineBlocks :: Map Int ByteString -> ByteString
 combineBlocks = BS.concat . Map.elems

@@ -46,11 +46,9 @@ data Model = Model
     , tcache  :: LRU Int POSIXTime
     , haves   :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
     , queue   :: [(Int, Int, M.Msg)] -- WARN: unbounded
-    , metadls :: Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model)
-    -- do our network subscriptions work if we have the same compact info under
-    -- two different hashes? the answer is likely no, breaking the ongiong
-    -- download in the worst case. We might have to filter/queue these or
-    -- allow multiple connections to the same compactinfo in the api.
+    , metadls :: Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model) -- TODO: Time these out?
+    -- Also if we have too many downloads early but we want to keep the number of nodes high
+    -- can add a database queue for metadata dls
     }
 
 data MMsg
@@ -74,11 +72,13 @@ init =
     , Cmd.batch [(Cmd.randomBytes 20 (MMsg . NewNodeId i)) | i <- [0..nMplex-1]]
     )
 
+
 subscriptions :: Model -> Sub MMsg
 subscriptions mm
-    | indices m == [] = Sub.none
-    | isUn (m ! 0) = Sub.none
-    | otherwise = Sub.batch
+    | indices mainms == [] = Sub.none
+    | isUn (mainms ! 0) = Sub.none
+    | otherwise = Sub.batch $
+        (Sub.up RMsg $ Sub.batch rsubs) :
         [ Sub.udp M.servePort (\ci r -> MMsg $ M.parseReceivedBytes ci r)
         , Sub.timer 100 ProcessQueue
         , Sub.timer (60 * 1000) (\t -> MMsg $ M.TimeoutTransactions t)
@@ -86,9 +86,18 @@ subscriptions mm
         ]
 
         where
-            m = models mm
+            mainms = models mm
+
+            isUn :: M.Model -> Bool
             isUn (M.Uninitialized) = True
             isUn _ = False
+
+            rsubs :: [ Sub R.Msg ]
+            rsubs = map (\(ih, (ci, mdl)) -> R.subscriptions ih ci mdl) rmodels
+
+            rmodels = Map.assocs (metadls mm)
+                >>= \(ih, (_, m)) -> zip (repeat ih) (Map.assocs m)
+
 
 update :: MMsg -> Model -> (Model, Cmd MMsg)
 update (MMsg (NewNodeId ix bs)) m = updateExplicit (NewNodeId ix bs) m ix
@@ -310,11 +319,7 @@ update (MMsg (PeersFoundResult nodeid infohash peers)) model
 
         rinit :: CompactInfo -> (R.Model, Cmd R.Msg)
         rinit ci =
-            R.update
-                infohash
-                ci
-                (R.DownloadInfo nodeid)
-                R.Off
+            R.update (R.DownloadInfo nodeid infohash ci) R.Off
 
         dls = metadls model
 
@@ -330,6 +335,53 @@ update (MMsg (PeersFoundResult nodeid infohash peers)) model
         newcmds :: [Cmd R.Msg]
         newcmds = map (snd . snd) $
             filter (((flip Map.notMember) existingMdls) . fst) rinfo
+
+update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
+
+    where
+        (infohash, ci) = details m
+
+        dls = metadls model
+
+        newdls = case Map.null newmodelm of
+            True -> Map.delete infohash dls
+            False -> Map.insert infohash (newSharedMdl, newmodelm) dls
+
+        (sharedmodel, rmodelm) = dls Map.! infohash
+
+        rmodel2 = rmodelm Map.! ci
+
+        (newmodel, cmds) = case (sharedmodel, rmodel2, m) of
+            (R.Downloading {}, R.Downloading {}, _) ->
+                R.update m (mergeDls sharedmodel rmodel2)
+            (R.Downloading mdataSize _ lastBlk blks, _, (R.Got _ _ _ msg)) ->
+                case R.chooseNextBlk mdataSize lastBlk blks of
+                    Nothing ->
+                        ( R.Off
+                        , Cmd.log Cmd.DEBUG
+                            [ "Not starting seemingly finished download" ]
+                        )
+                    Just nextBlk ->
+                        R.update (R.Got nextBlk infohash ci msg) rmodel2
+            _ -> R.update m rmodel2
+
+        newmodelm = case newmodel of
+            R.Off -> Map.delete ci rmodelm
+            _ -> Map.insert ci newmodel rmodelm
+
+        newSharedMdl = case newmodel of
+            R.Downloading {} -> newmodel
+            _ -> sharedmodel
+
+        details :: R.Msg -> (InfoHash, CompactInfo)
+        details (R.DownloadInfo _ i c) = (i, c)
+        details (R.GotHandshake i c _) = (i, c)
+        details (R.Got _ i c _) = (i, c)
+
+        mergeDls :: R.Model -> R.Model -> R.Model
+        mergeDls (R.Downloading _ _ lastBlk blks) (R.Downloading sz msgid _ _)
+            = R.Downloading sz msgid lastBlk blks
+        mergeDls _ _ = undefined
 
 
 queryToIndex :: Message -> Model -> Int
@@ -370,6 +422,7 @@ queryToIndex
 
 queryToIndex _ _ = undefined
 
+
 updateExplicit :: M.Msg -> Model -> Int -> (Model, Cmd MMsg)
 updateExplicit msg model ix =
     ( model { models = m // [(ix, mm)] }
@@ -380,6 +433,7 @@ updateExplicit msg model ix =
         m = models model
         (mm, cmds) = M.update msg (m ! ix)
 
+
 propagateTimer :: M.Msg -> Model -> (Model, Cmd MMsg)
 propagateTimer msg m = (m { models = models2 }, cmds)
     where
@@ -388,6 +442,7 @@ propagateTimer msg m = (m { models = models2 }, cmds)
 
         models2 = fmap fst modelCmds
         cmds = Cmd.batch $ toList $ fmap ((Cmd.up MMsg) . snd) modelCmds
+
 
 sendOrQueue
     :: Either (LRU Int POSIXTime) (LRU Int POSIXTime)

@@ -5,6 +5,7 @@ module Architecture.Internal.Sub
     , updateSubscriptions
     , connectTCP
     , ciToAddr
+    , mapTSub
     ) where
 
 import Prelude hiding (init)
@@ -304,3 +305,8 @@ handleCmd cfg istate cmd = do
 
     where
         tmodel = fst (init cfg)
+
+mapTSub :: (msg0 -> msg1) -> TSub msg0 -> TSub msg1
+mapTSub f (TCPClient t ci g h) = TCPClient t ci g (f . h)
+mapTSub f (UDP p h)            = UDP p (\ci -> f . (h ci))
+mapTSub f (Timer ms h)         = Timer ms (f . h)
