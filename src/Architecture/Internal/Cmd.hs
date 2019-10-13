@@ -163,7 +163,7 @@ updateWriters (CmdSendUDP srcPort ci bs) istate =
 
         cmd = CmdSendUDP srcPort ci bs
 
-updateWriters (CmdSendTCP ci bs) istate =
+updateWriters (CmdSendTCP t ci bs) istate =
     updateWriters_
         cmd
         istate
@@ -178,7 +178,7 @@ updateWriters (CmdSendTCP ci bs) istate =
             writeTQueue q bs
             return q
 
-        cmd = CmdSendTCP ci bs
+        cmd = CmdSendTCP t ci bs
 
 updateWriters (QuitW key) istate = do
     atomically $ modifyTVar
@@ -314,7 +314,7 @@ sinkTCmd writeS sink cmd = do
 
 enqueueCmd :: CmdQ -> TCmd msg schemas -> STM ()
 enqueueCmd (UDPQueue q) (CmdSendUDP _ ci bs) = writeTQueue q (ci, bs)
-enqueueCmd (TCPQueue q) (CmdSendTCP _ bs)    = writeTQueue q bs
+enqueueCmd (TCPQueue q) (CmdSendTCP _ _ bs)  = writeTQueue q bs
 enqueueCmd _            _                    = undefined
 
 
@@ -351,7 +351,7 @@ batch cmds = Cmd $ concat [t | (Cmd t) <- cmds]
 
 getKey :: TCmd msg schemas -> Int
 getKey (CmdSendUDP srcPort _ _) = hash $ UDP srcPort undefined
-getKey (CmdSendTCP ci _)        = hash $ TCPClient ci undefined undefined
+getKey (CmdSendTCP t ci _)      = hash $ TCPClient t ci undefined undefined
 getKey _                        = undefined
 
 
@@ -361,7 +361,7 @@ mapTCmd f (CmdGetRandom h) = CmdGetRandom (f . h)
 mapTCmd f (CmdGetTime h) = CmdGetTime (f . h)
 mapTCmd f (CmdRandomBytes n h) = CmdRandomBytes n (f . h)
 mapTCmd _ (CmdSendUDP p ci bs) = CmdSendUDP p ci bs
-mapTCmd _ (CmdSendTCP ci bs) = CmdSendTCP ci bs
+mapTCmd _ (CmdSendTCP t ci bs) = CmdSendTCP t ci bs
 mapTCmd f (CmdReadFile p h) = CmdReadFile p (f . h)
 mapTCmd _ (CmdWriteFile p bs) = CmdWriteFile p bs
 mapTCmd f (CmdDatabase sesh (Just h)) = CmdDatabase sesh (Just $ f . h)

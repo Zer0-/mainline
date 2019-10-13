@@ -139,7 +139,7 @@ updateHandlers rs tsubs =
 
 
 writeHdlr :: SubHandler msg -> TSub msg -> STM ()
-writeHdlr (TCPClientHandler tv) (TCPClient _ getMore h) =
+writeHdlr (TCPClientHandler tv) (TCPClient _ _ getMore h) =
     writeTVar tv (getMore, h)
 writeHdlr (UDPHandler tv) (UDP _ h) = writeTVar tv h
 writeHdlr (TimerHandler tv) (Timer _ h) = writeTVar tv h
@@ -175,7 +175,7 @@ subscribe cfg istate key msocket (UDP p h) = do
             Just s -> return s
             Nothing -> openUDPPort p
 
-subscribe cfg istate key msocket (TCPClient ci getMore h) = do
+subscribe cfg istate key msocket (TCPClient _ ci getMore h) = do
     th <- atomically (newTVar (getMore, h))
     sock <- getsock
     threadId <- forkIO $ runTCPClientSub cfg istate key sock th

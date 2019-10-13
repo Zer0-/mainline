@@ -28,8 +28,7 @@ import Network.KRPC.Types
     )
 import Network.Octets (octToByteString)
 import Mainline.RoutingTable (RoutingTable (..), nclosest)
-import Mainline.ResolveMagnet as R
-import Mainline.SQL (Schemas);
+import qualified Mainline.ResolveMagnet as R
 import qualified Mainline.SQL as SQL
 
 -- Number of nodes on this port
@@ -47,7 +46,11 @@ data Model = Model
     , tcache  :: LRU Int POSIXTime
     , haves   :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
     , queue   :: [(Int, Int, M.Msg)] -- WARN: unbounded
-    , metadls :: Map InfoHash (R.Model, Map CompactInfo R.Model)
+    , metadls :: Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model)
+    -- do our network subscriptions work if we have the same compact info under
+    -- two different hashes? the answer is likely no, breaking the ongiong
+    -- download in the worst case. We might have to filter/queue these or
+    -- allow multiple connections to the same compactinfo in the api.
     }
 
 data MMsg
@@ -101,7 +104,7 @@ update
         )
     ))
     mm
-    | null havet = adaptResult $ M.logHelper
+    | null havet = adaptResult MMsg $ M.logHelper
         (NodeInfo nodeid ci)
         (Response nodeid r)
         "Ignoring a response that wasn't in our transaction state from"
@@ -235,7 +238,7 @@ update
         msg = Inbound t ci (KPacket transactionId (Query nodeid q) v)
 
 update (MMsg (Inbound _ ci ( KPacket { message }))) m =
-    adaptResult $ M.logErr ci message m
+    adaptResult MMsg $ M.logErr ci message m
 
 update (MMsg (SendFirstMessage { idx, sendRecipient, body, newtid })) m =
     sendOrQueue
@@ -286,18 +289,17 @@ update (MMsg (MaintainPeers now)) m =
 
 update (MMsg (PeersFoundResult nodeid infohash peers)) model
     | Map.member infohash dls =
-        ( model { metadls = existingMdls `Map.union` initialMdls }
-        , Cmd.up RMsg newcmds
+        ( model { metadls = Map.insert infohash (newMdls) dls }
+        , Cmd.up RMsg (Cmd.batch newcmds)
         )
     | otherwise =
-        ( model { metadls = Map.insert infohash (R.Off, initial) dls }
+        ( model { metadls = Map.insert infohash (R.Off, initialMdls) dls }
         , Cmd.up RMsg (Cmd.batch cmds)
         )
 
     where
+        cmds :: [Cmd R.Msg]
         cmds = map snd inits
-
-        initial = Map.singleton ci initialMdls
 
         initialMdls = Map.fromList (map (\(ci, (mdl, _)) -> (ci, mdl)) rinfo)
 
@@ -306,16 +308,28 @@ update (MMsg (PeersFoundResult nodeid infohash peers)) model
 
         inits = map rinit peers
 
-        rinit ci = R.update (R.DownloadInfo nodeid infohash ci) R.Off
+        rinit :: CompactInfo -> (R.Model, Cmd R.Msg)
+        rinit ci =
+            R.update
+                infohash
+                ci
+                (R.DownloadInfo nodeid)
+                R.Off
 
         dls = metadls model
 
         -- For the case of existing download
+        existingInfo = dls Map.! infohash
 
-        existingMdls :: Map CompactInfo R.Model
-        existingMdls = snd (dls Map.! infohash)
+        existingMdls :: Map.Map CompactInfo R.Model
+        existingMdls = snd existingInfo
 
-        newcmds = filter ((flip Map.notMember) existingMdls) cmds
+        newMdls :: (R.Model, Map.Map CompactInfo R.Model)
+        newMdls = (fst existingInfo, existingMdls `Map.union` initialMdls)
+
+        newcmds :: [Cmd R.Msg]
+        newcmds = map (snd . snd) $
+            filter (((flip Map.notMember) existingMdls) . fst) rinfo
 
 
 queryToIndex :: Message -> Model -> Int
@@ -356,7 +370,7 @@ queryToIndex
 
 queryToIndex _ _ = undefined
 
-updateExplicit :: Msg -> Model -> Int -> (Model, Cmd MMsg)
+updateExplicit :: M.Msg -> Model -> Int -> (Model, Cmd MMsg)
 updateExplicit msg model ix =
     ( model { models = m // [(ix, mm)] }
     , Cmd.up MMsg cmds
@@ -366,7 +380,7 @@ updateExplicit msg model ix =
         m = models model
         (mm, cmds) = M.update msg (m ! ix)
 
-propagateTimer :: Msg -> Model -> (Model, Cmd MMsg)
+propagateTimer :: M.Msg -> Model -> (Model, Cmd MMsg)
 propagateTimer msg m = (m { models = models2 }, cmds)
     where
         modelCmds = fmap f (models m)
@@ -378,7 +392,7 @@ propagateTimer msg m = (m { models = models2 }, cmds)
 sendOrQueue
     :: Either (LRU Int POSIXTime) (LRU Int POSIXTime)
     -> Int
-    -> Msg
+    -> M.Msg
     -> Int
     -> Model
     -> (Model, Cmd MMsg)
@@ -412,8 +426,8 @@ throttle cache key now cps =
 hashci :: CompactInfo -> Int
 hashci (CompactInfo ip port) = hashWithSalt (hash ip) port
 
-adaptResult :: (a, Cmd Msg schemas) -> (a, Cmd MMsg schemas)
-adaptResult (model, cmd) = (model, Cmd.up MMsg cmd)
+adaptResult :: (msg0 -> msg1) -> (a, Cmd msg0) -> (a, Cmd msg1)
+adaptResult f (model, cmd) = (model, Cmd.up f cmd)
 
 e :: Integer -> Integer -> Integer
 e = (^)

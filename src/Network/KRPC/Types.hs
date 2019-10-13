@@ -29,7 +29,7 @@ type Token = ByteString
 data CompactInfo = CompactInfo
     { ip    :: Word32
     , port  :: Port
-    } deriving Eq
+    } deriving (Eq, Ord)
 
 
 instance Octets CompactInfo where

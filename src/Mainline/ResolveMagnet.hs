@@ -17,17 +17,15 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Serialize (encode, decode)
 import Data.Default (def)
-import Data.Maybe (fromJust)
 
 import qualified Data.BEncode as B
 import qualified Network.BitTorrent.Exchange.Message as BT
 import qualified Network.BitTorrent.Address as BT
 import qualified Data.Torrent as BTT
 
-import Network.KRPC.Helpers (stringpack, hexify)
-import Network.KRPC.Types (Port, CompactInfo(..), NodeID, InfoHash)
-import Network.Octets (fromOctets, fromByteString, octToByteString)
-import Architecture.TEA (simpleApp)
+import Network.KRPC.Helpers (hexify)
+import Network.KRPC.Types (CompactInfo(..), NodeID, InfoHash)
+import Network.Octets (fromByteString, octToByteString)
 import Architecture.Sub (Sub, Received(..))
 import qualified Architecture.Sub as Sub
 import qualified Architecture.Cmd as Cmd
@@ -48,31 +46,31 @@ data Model
         }
 
 data Msg
-    = DownloadInfo NodeID InfoHash CompactInfo
+    = DownloadInfo NodeID
     | GotHandshake (Either String BT.Handshake)
     | Got (Either String BT.Message)
 
 
-update :: Msg -> Model -> (Model, Cmd Msg)
-update (DownloadInfo ourid infohash ci) Off =
+update :: InfoHash -> CompactInfo -> Msg -> Model -> (Model, Cmd Msg)
+update t ci (DownloadInfo ourid) Off =
     (Handshake, Cmd.batch [ logmsg, sendHandshake ])
 
     where
         logmsg = Cmd.log Cmd.DEBUG
             [ "Downloading information"
-            , show $ hexify $ octToByteString infohash
+            , show $ hexify $ octToByteString t
             , "from", show ci
             ]
 
-        sendHandshake = Cmd.sendTCP ci (encode handshake)
+        sendHandshake = Cmd.sendTCP t ci (encode handshake)
 
         handshake = BT.Handshake
             def
             (BT.toCaps [ BT.ExtExtended ])
-            (BTT.InfoHash $ octToByteString infohash)
+            (BTT.InfoHash $ octToByteString t)
             (BT.PeerId $ octToByteString ourid)
 
-update (GotHandshake handshake) Handshake =
+update t ci (GotHandshake handshake) Handshake =
     (ExtensionHandshake, Cmd.batch [ logmsg, sendCmd ])
 
     where
@@ -82,7 +80,7 @@ update (GotHandshake handshake) Handshake =
             , show $ encode eshake
             ]
 
-        sendCmd = Cmd.sendTCP knownNodeInfo (encode eshake)
+        sendCmd = Cmd.sendTCP t ci (encode eshake)
 
         -- TODO: check handshake for supporting BT.ExtExtended
         -- Or just keep going
@@ -95,6 +93,8 @@ update (GotHandshake handshake) Handshake =
         supportedExtensions = BT.ExtendedCaps $ singleton BT.ExtMetadata 1
 
 update
+    t
+    ci
     ( Got
         ( Right
             ( BT.Extended
@@ -128,9 +128,11 @@ update
                 ]
 
             mExtmMsgId = Map.lookup BT.ExtMetadata (BT.extendedCaps exts)
-            mkSendCmd msgid = pieceReq msgid 0 knownNodeInfo
+            mkSendCmd msgid = pieceReq msgid 0 t ci
 
 update
+    t
+    ci
     ( Got
         ( Right
             ( BT.Extended
@@ -156,7 +158,7 @@ update
             Nothing -> (Off, logmsgs)
             (Just i) ->
                 ( Downloading metadataSize extMetadataMsgid i blocks2
-                , Cmd.batch [ logmsg, pieceReq extMetadataMsgid i knownNodeInfo ]
+                , Cmd.batch [ logmsg, pieceReq extMetadataMsgid i t ci ]
                 )
 
         where
@@ -178,6 +180,8 @@ update
                 ]
 
 update
+    _
+    _
     (Got (Right (BT.Available _)))
     (Downloading { metadataSize, extMetadataMsgid, lastBlkRequested, blocks }) =
         ( Downloading
@@ -194,7 +198,7 @@ update
                 Cmd.DEBUG
                 [ "Ignoring Available response from server" ]
 
-update (GotHandshake have) _ = (Off, logmsg)
+update _ _ (GotHandshake have) _ = (Off, logmsg)
     where
         logmsg = Cmd.log
             Cmd.INFO
@@ -202,13 +206,13 @@ update (GotHandshake have) _ = (Off, logmsg)
             , show have
             ]
 
-update _ Off = (Off, Cmd.none)
+update _ _ _ Off = (Off, Cmd.none)
 
 
-subscriptions :: Model -> Sub Msg
-subscriptions Off = Sub.none
-subscriptions Handshake =
-    Sub.readTCP knownNodeInfo numToRead (GotHandshake . decode . bytes)
+subscriptions :: InfoHash -> CompactInfo -> Model -> Sub Msg
+subscriptions _ _ Off = Sub.none
+subscriptions t ci Handshake =
+    Sub.readTCP t ci numToRead (GotHandshake . decode . bytes)
 
     where
         numToRead :: ByteString -> Int
@@ -220,7 +224,7 @@ subscriptions Handshake =
             + 20 -- NodeID
             - BS.length bs
 
-subscriptions _ = Sub.readTCP knownNodeInfo numToRead (Got . decode . bytes)
+subscriptions t ci _ = Sub.readTCP t ci numToRead (Got . decode . bytes)
     where
         numToRead :: ByteString -> Int
         numToRead bs
@@ -252,11 +256,12 @@ chooseNextBlk lastBlkRequested nblks haveblks =
 combineBlocks :: Map Int ByteString -> ByteString
 combineBlocks = BS.concat . Map.elems
 
-pieceReq :: Word8 -> Int -> CompactInfo -> Cmd Msg
-pieceReq msgid i ci =
+pieceReq :: Word8 -> Int -> InfoHash -> CompactInfo -> Cmd Msg
+pieceReq msgid i t ci =
     Cmd.sendTCP
-    ci
-    (encode (BT.Extended $ BT.EMetadata msgid (BT.MetadataRequest i)))
+        t
+        ci
+        (encode (BT.Extended $ BT.EMetadata msgid (BT.MetadataRequest i)))
 
 
 {-

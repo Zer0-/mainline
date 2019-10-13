@@ -9,6 +9,7 @@ module Architecture.Sub
     ) where
 
 import Data.ByteString (ByteString)
+import Data.Hashable (Hashable)
 import Data.Time.Clock.POSIX (POSIXTime)
 
 import Network.KRPC.Types (Port, CompactInfo)
@@ -19,8 +20,13 @@ import Architecture.Internal.Types
     )
 import Architecture.Internal.Sub (Received (..))
 
-readTCP :: CompactInfo -> (ByteString -> Int) -> (Received -> msg) -> Sub msg
-readTCP ci g h = Sub [ TCPClient ci g h ]
+readTCP :: Hashable t
+        => t
+        -> CompactInfo
+        -> (ByteString -> Int)
+        -> (Received -> msg)
+        -> Sub msg
+readTCP t ci g h = Sub [ TCPClient t ci g h ]
 
 udp :: Port -> (CompactInfo -> Received -> msg) -> Sub msg
 udp port h = Sub [ UDP port h ]

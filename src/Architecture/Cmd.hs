@@ -19,6 +19,7 @@ module Architecture.Cmd
 
 import Prelude hiding (log, print, readFile, writeFile)
 import Data.List (intercalate)
+import Data.Hashable (Hashable)
 import Data.ByteString (ByteString)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Squeal.PostgreSQL.Pool (PoolPQ)
@@ -52,8 +53,8 @@ none = Cmd []
 sendUDP :: Port -> CompactInfo -> ByteString -> Cmd msg schemas
 sendUDP p dest bs = Cmd [ CmdSendUDP p dest bs ]
 
-sendTCP :: CompactInfo -> ByteString -> Cmd msg schemas
-sendTCP ci bs = Cmd [ CmdSendTCP ci bs ]
+sendTCP :: Hashable t => t -> CompactInfo -> ByteString -> Cmd msg schemas
+sendTCP t ci bs = Cmd [ CmdSendTCP t ci bs ]
 
 getTime :: (POSIXTime -> msg) -> Cmd msg schemas
 getTime f = Cmd [ CmdGetTime f ]
