@@ -50,6 +50,7 @@ data Msg
     = DownloadInfo NodeID InfoHash CompactInfo
     | GotHandshake InfoHash CompactInfo (Either String BT.Handshake)
     | Got Int InfoHash CompactInfo (Either String BT.Message)
+    | Have InfoHash BTT.InfoDict
 
 
 update :: Msg -> Model -> (Model, Cmd Msg)
@@ -151,7 +152,7 @@ update
         }
     ) =
         case nextblk of
-            Nothing -> (Off, logmsgs) -- TODO: Cmd.bounce some message
+            Nothing -> (Off, whenDone)
             (Just i) ->
                 ( Downloading metadataSize extMetadataMsgid i blocks2
                 , Cmd.batch [ logmsg, pieceReq extMetadataMsgid i t ci ]
@@ -168,10 +169,41 @@ update
                 , "size:" , show $ BS.length blkbs
                 ]
 
-            logmsgs = Cmd.log Cmd.INFO
-                [ "Have whole info dict"
-                , show $ (B.decode (combineBlocks blocks2) :: Either String BTT.InfoDict)
-                ]
+
+            -- case of Nothing
+
+            decodeResult :: Either String BTT.InfoDict
+            decodeResult = B.decode (combineBlocks blocks2)
+
+            whenDone = case decodeResult of
+                Left errmsg ->
+                    Cmd.log Cmd.WARNING
+                        [ "Failed to fetch", prettyIH
+                        , "Reason given:", errmsg
+                        ]
+                Right infodict ->
+                    Cmd.batch
+                    [ Cmd.log Cmd.DEBUG
+                        [ prettyIH
+                        , "info successfully downloaded"
+                        ]
+                    ,
+                        let
+                            calculated =
+                                BTT.getInfoHash $ BTT.idInfoHash infodict
+                            expected = octToByteString t
+                        in
+                            if calculated /= expected
+                            then Cmd.log Cmd.WARNING
+                                [ "Calculated infohash does not match expected!"
+                                , "calculated:", hexify calculated
+                                , "expected:", hexify expected
+                                ]
+                            else Cmd.none
+                    , Cmd.bounce $ Have t infodict
+                    ]
+
+            prettyIH = show $ hexify $ octToByteString t
 
 update
     (Got _ _ _ (Right (BT.Available _)))
