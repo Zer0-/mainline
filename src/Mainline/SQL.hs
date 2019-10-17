@@ -14,6 +14,8 @@ module Mainline.SQL
     , connstr
     , queryExists
     , insertInfo
+    , incrementScore
+    , mIncrementScore
     ) where
 
 import Generics.SOP (NP (..))
@@ -87,6 +89,8 @@ import Squeal.PostgreSQL
     , manipulateParams
     , transactionally_
     , manipulate_
+    , manipulateParams_
+    , update_
     )
 
 connstr :: ByteString
@@ -255,7 +259,6 @@ mInsertFiles haskValues =
 mInsertInfo
     :: Double
     -> Manipulation_ Schemas (ByteString, Int32, Text, ByteString) (Only Int32)
-    -- -> Manipulation '[] Schemas InfoParamsType '["info_id" ::: 'NotNull 'PGint4]
 mInsertInfo score =
     with ((mInsertMetaInfo score) `as` #tmp_info_id) insPieces
 
@@ -301,6 +304,16 @@ insertInfo infohash piecelen name score piecesBs filetups =
                 manipulate_ $
                     mInsertFiles
                         (map (\(a, b) -> (fromOnly infoid, a, b)) filetups)
+
+mIncrementScore :: Manipulation_ Schemas (ByteString, Double) ()
+mIncrementScore =
+    update_ #meta_info
+        (Set (#score + param @2) `as` #score)
+        (#info_hash .== param @1)
+
+incrementScore :: ByteString -> Double -> PQ Schemas Schemas IO ()
+incrementScore infohash addscore =
+    manipulateParams_ mIncrementScore (infohash, addscore)
 
 runSetup :: IO ()
 runSetup = withConnection connstr $ define setup

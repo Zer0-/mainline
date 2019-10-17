@@ -191,8 +191,13 @@ update
                 (SQL.queryExists (octToByteString infohash))
                 (Just $ DBHasInfo now infohash idx)
 
-        --insertScore score = Cmd.db session? Nothing
-        insertScore score = Cmd.db undefined Nothing
+        insertScore score =
+            Cmd.db
+                ( SQL.incrementScore
+                    (octToByteString infohash)
+                    (calculateScore score now)
+                )
+                Nothing
 
 
 update (DBHasInfo t infohash _ True) model =
