@@ -13,8 +13,7 @@ module Mainline.SQL
     , runSetup
     , connstr
     , queryExists
-    , qInfoExists
-    , mInsertInfoDict
+    , insertInfo
     ) where
 
 import Generics.SOP (NP (..))
@@ -67,19 +66,15 @@ import Squeal.PostgreSQL
     , runQueryParams
     , Only (..)
     , firstRow
-    , update_
     , Optional (..)
     , Manipulation
     , Manipulation_
-    , manipulateParams_
-    , Result
     , insertInto_
     , insertInto
     , QueryClause (..)
     , Aliased
     , Grouping (..)
     , Expression
-    , VarArray (..)
     , literal
     , array
     , pattern Values_
@@ -87,17 +82,11 @@ import Squeal.PostgreSQL
     , ReturningClause (..)
     , with
     , (!)
-    , Has
-    , CommonTableExpression (..)
-    , Path (..)
     , pattern Values_
-    , values
-    , values_
-    , crossJoin
-    , Selection (..)
-    , subquery
-    , select
     , common
+    , manipulateParams
+    , transactionally_
+    , manipulate_
     )
 
 connstr :: ByteString
@@ -106,46 +95,46 @@ connstr = "host=192.168.4.2 dbname=test user=guest password=invisiblegiraffe"
 type Schemas = Public Schema
 
 type Schema =
-    '[ "meta_info"   ::: 'Table (MetaInfoConstraints   :=> MetaInfoColumns)
-    ,  "file_info"   ::: 'Table (FileInfoConstraints   :=> FileInfoColumns)
-    ,  "info_pieces" ::: 'Table (InfoPiecesConstraints :=> InfoPiecesColumns)
+   '[ "meta_info"   ::: 'Table (MetaInfoConstraints   :=> MetaInfoColumns)
+    , "file_info"   ::: 'Table (FileInfoConstraints   :=> FileInfoColumns)
+    , "info_pieces" ::: 'Table (InfoPiecesConstraints :=> InfoPiecesColumns)
     ]
 
 type MetaInfoConstraints =
-    '[ "hash_len"         ::: 'Check      '["info_hash"]
-    ,  "info_pk"          ::: 'PrimaryKey '["info_id"]
-    ,  "info_hash_unique" ::: 'Unique     '["info_hash"]
+   '[ "hash_len"         ::: 'Check      '["info_hash"]
+    , "info_pk"          ::: 'PrimaryKey '["info_id"]
+    , "info_hash_unique" ::: 'Unique     '["info_hash"]
     ]
 
 type MetaInfoColumns =
-    '[ "info_id"         ::: 'Def   :=> 'NotNull 'PGint4
-    ,  "info_hash"       ::: 'NoDef :=> 'NotNull 'PGbytea
-    ,  "piece_len_bytes" ::: 'NoDef :=> 'NotNull 'PGint4
-    ,  "name"            ::: 'NoDef :=> 'NotNull 'PGtext
-    ,  "added"           ::: 'Def   :=> 'NotNull 'PGtimestamptz
-    ,  "score"           ::: 'Def   :=> 'NotNull 'PGfloat8
+   '[ "info_id"         ::: 'Def   :=> 'NotNull 'PGint4
+    , "info_hash"       ::: 'NoDef :=> 'NotNull 'PGbytea
+    , "piece_len_bytes" ::: 'NoDef :=> 'NotNull 'PGint4
+    , "name"            ::: 'NoDef :=> 'NotNull 'PGtext
+    , "added"           ::: 'Def   :=> 'NotNull 'PGtimestamptz
+    , "score"           ::: 'Def   :=> 'NotNull 'PGfloat8
     ]
 
 type FileInfoConstraints =
-    '[ "file_pk" ::: 'PrimaryKey '["info_id", "filepath"]
-    ,  "file_fk" ::: 'ForeignKey '["info_id"] "meta_info" '["info_id"]
+   '[ "file_pk" ::: 'PrimaryKey '["info_id", "filepath"]
+    , "file_fk" ::: 'ForeignKey '["info_id"] "meta_info" '["info_id"]
     ]
 
 type FileInfoColumns =
-    '[ "info_id"    ::: 'NoDef :=> 'NotNull 'PGint4
-    ,  "filepath"   ::: 'NoDef :=> 'NotNull ('PGvararray ('NotNull 'PGtext))
-    ,  "size_bytes" ::: 'NoDef :=> 'NotNull 'PGint4
+   '[ "info_id"    ::: 'NoDef :=> 'NotNull 'PGint4
+    , "filepath"   ::: 'NoDef :=> 'NotNull ('PGvararray ('NotNull 'PGtext))
+    , "size_bytes" ::: 'NoDef :=> 'NotNull 'PGint4
     ]
 
 type InfoPiecesConstraints =
-    '[ "pieces_divisible" ::: 'Check '["pieces"]
+   '[ "pieces_divisible" ::: 'Check '["pieces"]
     , "pieces_pk" ::: 'PrimaryKey '["info_id"]
     , "pieces_fk" ::: 'ForeignKey '["info_id"] "meta_info" '["info_id"]
     ]
 
 type InfoPiecesColumns =
-    '[ "info_id" ::: 'NoDef :=> 'NotNull 'PGint4
-    ,  "pieces"  ::: 'NoDef :=> 'NotNull 'PGbytea
+   '[ "info_id" ::: 'NoDef :=> 'NotNull 'PGint4
+    , "pieces"  ::: 'NoDef :=> 'NotNull 'PGbytea
     ]
 
 setup :: Definition Schemas Schemas
@@ -194,7 +183,7 @@ qInfoExists =
 
 queryExists_ :: ByteString -> PQ Schemas Schemas IO (Maybe (Only Int32))
 queryExists_ infohash = do
-    result <- (runQueryParams qInfoExists (Only infohash))
+    result <- runQueryParams qInfoExists (Only infohash)
     firstRow result
 
 queryExists :: ByteString -> PQ Schemas Schemas IO Bool
@@ -229,12 +218,6 @@ type InfoParamsType =
     , 'NotNull 'PGbytea
     ]
 
-type FileParamType =
-   '[ 'NotNull 'PGint4
-    , 'NotNull ('PGvararray ('NotNull 'PGtext))
-    , 'NotNull 'PGint4
-    ]
-
 type FileVal = NP
     ( Aliased
         ( Optional
@@ -243,7 +226,7 @@ type FileVal = NP
                 '[]
                 'Ungrouped
                 Schemas
-                FileParamType
+                '[]
                 '[]
             )
         )
@@ -253,7 +236,7 @@ type FileVal = NP
 
 mInsertFiles
     :: [(Int32, [Text], Int32)]
-    -> Manipulation_ Schemas (Int32, VarArray [Text], Int32) ()
+    -> Manipulation_ Schemas () ()
 mInsertFiles haskValues =
     insertInto_ #file_info
         ( Values
@@ -269,20 +252,55 @@ mInsertFiles haskValues =
             :* Set (literal size) `as` #size_bytes
             )
 
-mInsertInfoDict
+mInsertInfo
     :: Double
-    -> ByteString
-    -> Manipulation '[] Schemas InfoParamsType '[]
-mInsertInfoDict score piecesHs =
+    -> Manipulation_ Schemas (ByteString, Int32, Text, ByteString) (Only Int32)
+    -- -> Manipulation '[] Schemas InfoParamsType '["info_id" ::: 'NotNull 'PGint4]
+mInsertInfo score =
     with ((mInsertMetaInfo score) `as` #tmp_info_id) insPieces
 
     where
-        insPieces = insertInto_ #info_pieces $ Select
-            (  Set (#tmp_info_id ! #info_id) `as` #info_id
-            :* Set (param @4) `as` #pieces
+        insPieces = insertInto #info_pieces
+            ( Select
+                (  Set (#tmp_info_id ! #info_id) `as` #info_id
+                :* Set (param @4) `as` #pieces
+                )
+                (from (common #tmp_info_id))
             )
-            (from (common #tmp_info_id))
+            OnConflictDoRaise
+            (Returning (#info_id `as` #fromOnly))
 
+insertInfoA
+    :: ByteString -- infohash
+    -> Int32      -- piece_len_bytes
+    -> Text       -- name
+    -> Double     -- score
+    -> ByteString -- pieces hash blob
+    -> PQ Schemas Schemas IO (Maybe (Only Int32))
+insertInfoA infohash piecelen name score piecesBs = do
+    result <- manipulateParams
+        (mInsertInfo score)
+        (infohash, piecelen, name, piecesBs)
+    firstRow result
+
+insertInfo
+    :: ByteString -- infohash
+    -> Int32      -- piece_len_bytes
+    -> Text       -- name
+    -> Double     -- score
+    -> ByteString -- pieces hash blob
+    -> [([Text], Int32)] -- files (path, size)
+    -> PQ Schemas Schemas IO ()
+insertInfo infohash piecelen name score piecesBs filetups =
+    transactionally_ $ do
+        result <- insertInfoA infohash piecelen name score piecesBs
+
+        case result of
+            Nothing -> undefined
+            Just infoid ->
+                manipulate_ $
+                    mInsertFiles
+                        (map (\(a, b) -> (fromOnly infoid, a, b)) filetups)
 
 runSetup :: IO ()
 runSetup = withConnection connstr $ define setup

@@ -2,6 +2,8 @@
 
 import Prelude hiding (init, lookup)
 import Data.Maybe (isJust)
+import Data.Text (Text)
+import Data.Int (Int32)
 import qualified Data.Map as Map
 import Data.Array (Array, listArray, indices, (!), (//), assocs)
 import Data.List (sortBy, foldl')
@@ -11,6 +13,8 @@ import Data.Foldable (toList)
 import Data.Cache.LRU (LRU, newLRU, lookup, insert)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (hashWithSalt, hash)
+import Data.ByteString (ByteString)
+import Data.Text.Encoding (decodeUtf8)
 
 import qualified Architecture.Cmd as Cmd
 import Architecture.TEA (dbApp)
@@ -30,6 +34,14 @@ import Network.Octets (octToByteString)
 import Mainline.RoutingTable (RoutingTable (..), nclosest)
 import qualified Mainline.ResolveMagnet as R
 import qualified Mainline.SQL as SQL
+
+import Data.Torrent
+    ( InfoDict (..)
+    , FileInfo (..)
+    , HashList (..)
+    , PieceInfo (..)
+    , LayoutInfo (..)
+    )
 
 -- Number of nodes on this port
 nMplex :: Int
@@ -171,9 +183,6 @@ update
                     case Map.lookup infohash (metadls mm) of
                         Just _ -> (cached, Cmd.none)
                         Nothing -> (cached, checkdb)
-                    -- TODO: also check ongoing info downloads, ✓
-                    -- after info download is complete remember to add a new
-                    -- entry into cached.
 
         cached = haves mm
 
@@ -342,22 +351,37 @@ update (RMsg (R.Have now infohash infodict)) model =
     )
 
     where
-        insertdb = Cmd.db undefined Nothing
-        -- What do we want to insert?
-        --  -info hash
-        --  -score
-        --  -piece size (for this we need to add a column)
-        --
-        --  -piece info
-        --
-        --  THEN (part 2)
-        --  -Insert (for each file in BTT.LayoutInfo
-        --      - path
-        --      -length
-        --
-        --  THEN (part 3)
-        --  - ts_vector or whatever it is (add column)
-        --  - (try to compute the value of this at sql level)
+        insertdb = Cmd.db insertSchema Nothing
+
+        insertSchema = SQL.insertInfo
+            (octToByteString infohash)
+            (fromIntegral $ piPieceLength pieceInfo)
+            (decodeUtf8 $ getName layoutInfo)
+            (calculateScore 1 now)
+            (unHashList $ piPieceHashes pieceInfo)
+            (getFileTups layoutInfo)
+
+        pieceInfo = idPieceInfo infodict
+
+        layoutInfo = idLayoutInfo infodict
+
+        getName :: LayoutInfo -> ByteString
+        getName SingleFile { liFile } = fiName liFile
+        getName MultiFile { liDirName } = liDirName
+
+        getFileTups :: LayoutInfo -> [([Text], Int32)]
+        getFileTups SingleFile { liFile } =
+            [( [decodeUtf8 $ fiName liFile]
+            ,  fromIntegral $ fiLength liFile
+            )]
+        getFileTups MultiFile { liFiles } = map mkFileTup liFiles
+
+        mkFileTup :: FileInfo [ByteString] -> ([Text], Int32)
+        mkFileTup FileInfo { fiLength, fiName } =
+            ( map decodeUtf8 fiName
+            , fromIntegral $ fiLength
+            )
+
 
 update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
 
@@ -484,6 +508,14 @@ sendOrQueue result key msg idx m =
 
         (Right cache) -> updateExplicit msg m { tcache = cache } idx
 
+calculateScore :: Int -> POSIXTime -> Double
+calculateScore n t = (euler ** ((log maxDbl / endt) * x) - 1) * (fromIntegral n)
+    where
+        maxDbl = 10 ** 300
+        t0 = 1571335545
+        endt = t0 + (1.577 * 10**10)
+        x = realToFrac t
+        euler = exp 1
 
 throttle
     :: (Ord a)
