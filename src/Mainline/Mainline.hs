@@ -65,29 +65,6 @@ import Mainline.SQL (Schemas);
 
 type Cmd msg = Cmd.Cmd msg Schemas
 
-{-
- - TODO:
- -
- -  - Create a data type for Node ✓
- -      - t_last_msg ✓
- -      - t_added ?
- -      - CompactInfo ✓
- -
- -  - Store nodes in ServerState in a map of NodeID -> Node ✓
- -  - [i] Combine RoutingTable and nodes map into one structure in own module ✓
- -  - Send out FindNode rather than initial Ping ✓
- -  - Create procedure to add seed node to ServerState (routing table) ✓
- -  - Create procedure to potentially add unknown node ✓
- -  - Extend Sub[.udp] to provide current time ✓
- -  - Test socket recvFrom timeout, catch the event to have more consistent timer ✓
- -  - Timer subscription for cleaning up (transactions, questionable nodes, etc)
- -
- - MILESTONE:
- -
- -   - Repeatedly issue find_nodes to closer and closer nodes, until completion ✓
- -}
-
-
 {- Constants -}
 
 servePort :: Port

@@ -22,7 +22,7 @@ import Data.List (intercalate)
 import Data.Hashable (Hashable)
 import Data.ByteString (ByteString)
 import Data.Time.Clock.POSIX (POSIXTime)
-import Squeal.PostgreSQL.Pool (PoolPQ)
+import Squeal.PostgreSQL (PQ)
 
 import Architecture.Internal.Cmd (batch, mapTCmd)
 
@@ -82,7 +82,7 @@ writeFile :: String -> ByteString -> Cmd msg schemas
 writeFile filename bs = Cmd [ CmdWriteFile filename bs ]
 
 
-db :: PoolPQ schemas IO result -> Maybe (result -> msg) -> Cmd msg schemas
+db :: PQ schemas schemas IO result -> Maybe (result -> msg) -> Cmd msg schemas
 db schemas f = Cmd [ CmdDatabase schemas f ]
 
 up :: (msg0 -> msg1) -> Cmd msg0 schemas -> Cmd msg1 schemas

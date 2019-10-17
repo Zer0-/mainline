@@ -12,6 +12,7 @@ import Prelude hiding (init)
 import Control.Applicative (liftA2)
 import Data.Word (Word8, Word32)
 import Data.Map (Map)
+import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Map as Map
 import Data.Map.Strict (singleton)
 import Data.ByteString (ByteString)
@@ -49,8 +50,8 @@ data Model
 data Msg
     = DownloadInfo NodeID InfoHash CompactInfo
     | GotHandshake InfoHash CompactInfo (Either String BT.Handshake)
-    | Got Int InfoHash CompactInfo (Either String BT.Message)
-    | Have InfoHash BTT.InfoDict
+    | Got POSIXTime Int InfoHash CompactInfo (Either String BT.Message)
+    | Have POSIXTime InfoHash BTT.InfoDict
 
 
 update :: Msg -> Model -> (Model, Cmd Msg)
@@ -95,7 +96,7 @@ update (GotHandshake t ci handshake) Handshake =
         supportedExtensions = BT.ExtendedCaps $ singleton BT.ExtMetadata 1
 
 update
-    ( Got firstBlk t ci
+    ( Got _ firstBlk t ci
         ( Right
             ( BT.Extended
                 ( BT.EHandshake
@@ -130,7 +131,7 @@ update
             mExtmMsgId = Map.lookup BT.ExtMetadata (BT.extendedCaps exts)
 
 update
-    ( Got _ t ci
+    ( Got now _ t ci
         ( Right
             ( BT.Extended
                 ( BT.EMetadata
@@ -200,13 +201,13 @@ update
                                 , "expected:", hexify expected
                                 ]
                             else Cmd.none
-                    , Cmd.bounce $ Have t infodict
+                    , Cmd.bounce $ Have now t infodict
                     ]
 
             prettyIH = show $ hexify $ octToByteString t
 
 update
-    (Got _ _ _ (Right (BT.Available _)))
+    (Got _ _ _ _ (Right (BT.Available _)))
     (Downloading { metadataSize, extMetadataMsgid, lastBlkRequested, blocks }) =
         ( Downloading
             { metadataSize
@@ -249,7 +250,7 @@ subscriptions t ci Handshake =
             - BS.length bs
 
 subscriptions t ci _ =
-    Sub.readTCP t ci numToRead ((Got 0 t ci) . decode . bytes)
+    Sub.readTCP t ci numToRead mkMsg
 
     where
         numToRead :: ByteString -> Int
@@ -259,6 +260,9 @@ subscriptions t ci _ =
 
         expectedLen :: ByteString -> Int
         expectedLen b = fromIntegral ((fromByteString b) :: Word32)
+
+        mkMsg :: Received -> Msg
+        mkMsg Received { bytes, time } = Got time 0 t ci (decode bytes)
 
 
 numBlks :: Int -> Int

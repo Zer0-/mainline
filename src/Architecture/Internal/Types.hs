@@ -24,7 +24,7 @@ import Data.Hashable (Hashable, hashWithSalt)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM (TVar, TMVar, TQueue)
 import Squeal.PostgreSQL (Connection)
-import Squeal.PostgreSQL.Pool (Pool, PoolPQ)
+import Squeal.PostgreSQL (Pool, PQ)
 import Generics.SOP (K (..))
 
 import Network.KRPC.Types (Port, CompactInfo)
@@ -40,7 +40,7 @@ data TCmd msg schemas
     | CmdReadFile String (BS.ByteString -> msg)
     | CmdWriteFile String BS.ByteString
     | forall result.
-        CmdDatabase (PoolPQ schemas IO result) (Maybe (result -> msg))
+        CmdDatabase (PQ schemas schemas IO result) (Maybe (result -> msg))
     | CmdBounce msg
     | QuitW Int
 

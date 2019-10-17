@@ -25,7 +25,7 @@ import Control.Concurrent.STM
 
 import Prelude hiding (init)
 import Generics.SOP (K (..))
-import Squeal.PostgreSQL.Pool (Pool, createConnectionPool, destroyAllResources)
+import Squeal.PostgreSQL.Pool (Pool, createConnectionPool, destroyConnectionPool)
 import Squeal.PostgreSQL (Connection)
 import Data.ByteString (ByteString)
 
@@ -49,7 +49,7 @@ loop self cfg = do
         else getThing
 
     case mthing of
-        Nothing -> maybe (return ()) destroyAllResources (dbPool self)
+        Nothing -> maybe (return ()) destroyConnectionPool (dbPool self)
         Just thing -> do
             newself <- case thing of
                 (Left tcmd) -> updateWriters tcmd self

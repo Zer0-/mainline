@@ -41,8 +41,7 @@ import Control.Concurrent.STM
     , writeTVar
     , modifyTVar
     )
-import Squeal.PostgreSQL (Connection)
-import Squeal.PostgreSQL.Pool (Pool, PoolPQ (runPoolPQ))
+import Squeal.PostgreSQL (Connection, Pool, usingConnectionPool)
 import Generics.SOP (K (..))
 
 import Network.KRPC.Types (CompactInfo (CompactInfo))
@@ -100,10 +99,10 @@ execTCmd _ _ _ (CmdSendUDP _ (CompactInfo ip 0) _) =
             ++ ". Invalid port 0!"
 
 execTCmd _ _ (Just pool) (CmdDatabase session (Just handler)) =
-    runPoolPQ session pool >>= return . Just . handler
+    usingConnectionPool pool $ session >>= return . Just . handler
 
 execTCmd _ _ (Just pool) (CmdDatabase session Nothing) =
-    runPoolPQ session pool >> return Nothing
+    usingConnectionPool pool $ session >> return Nothing
 
 execTCmd _ _ Nothing (CmdDatabase _ _) = undefined
 

@@ -134,7 +134,7 @@ update
                 M.getMTstate nodeid (M.transactions state) transactionId
 
 update
-    ( MMsg ( Inbound t ci
+    ( MMsg ( Inbound now ci
         ( KPacket
             { transactionId
             , message =
@@ -154,7 +154,7 @@ update
     mm = (model { haves = newHaves }, Cmd.batch [ cmds, cmds2 ])
 
     where
-        msg = Inbound t ci (KPacket transactionId (Query nodeid q) v)
+        msg = Inbound now ci (KPacket transactionId (Query nodeid q) v)
         q = AnnouncePeer impliedPort infohash port token mname
         idx = queryToIndex (Query nodeid q) mm
         (model, cmds) = updateExplicit msg mm idx
@@ -163,30 +163,27 @@ update
         (newHaves, cmds2) =
             case mHaveInfo of
                 Just (created, n) ->
-                    if t - created > fromIntegral scoreAggregateSeconds
-                    then (newCacheEntry, incrementScore (n + 1))
-                    else
-                        ( insert infohash (created, n + 1) cached
-                        , Cmd.none
-                        )
-
+                    if now - created > fromIntegral scoreAggregateSeconds
+                    then
+                        (insert infohash (now, 1) cached , insertScore (n + 1))
+                    else (insert infohash (created, n + 1) cached, Cmd.none)
                 Nothing ->
-                    -- TODO: also check ongoing info downloads,
+                    case Map.lookup infohash (metadls mm) of
+                        Just _ -> (cached, Cmd.none)
+                        Nothing -> (cached, checkdb)
+                    -- TODO: also check ongoing info downloads, ✓
                     -- after info download is complete remember to add a new
                     -- entry into cached.
-                    (cached, checkdb)
-
-        newCacheEntry = insert infohash (t, 1) cached
 
         cached = haves mm
-
-        --incrementScore score = Cmd.db session? Nothing
-        incrementScore = undefined
 
         checkdb =
             Cmd.db
                 (SQL.queryExists (octToByteString infohash))
-                (Just $ DBHasInfo t infohash idx)
+                (Just $ DBHasInfo now infohash idx)
+
+        --insertScore score = Cmd.db session? Nothing
+        insertScore score = Cmd.db undefined Nothing
 
 
 update (DBHasInfo t infohash _ True) model =
@@ -336,6 +333,32 @@ update (MMsg (PeersFoundResult nodeid infohash peers)) model
         newcmds = map (snd . snd) $
             filter (((flip Map.notMember) existingMdls) . fst) rinfo
 
+update (RMsg (R.Have now infohash infodict)) model =
+    ( model
+        { metadls = Map.delete infohash (metadls model)
+        , haves = insert infohash (now, 1) (haves model)
+        }
+    , insertdb
+    )
+
+    where
+        insertdb = Cmd.db undefined Nothing
+        -- What do we want to insert?
+        --  -info hash
+        --  -score
+        --  -piece size (for this we need to add a column)
+        --
+        --  -piece info
+        --
+        --  THEN (part 2)
+        --  -Insert (for each file in BTT.LayoutInfo
+        --      - path
+        --      -length
+        --
+        --  THEN (part 3)
+        --  - ts_vector or whatever it is (add column)
+        --  - (try to compute the value of this at sql level)
+
 update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
 
     where
@@ -354,7 +377,7 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
         (newmodel, cmds) = case (sharedmodel, rmodel2, m) of
             (R.Downloading {}, R.Downloading {}, _) ->
                 R.update m (mergeDls sharedmodel rmodel2)
-            (R.Downloading mdataSize _ lastBlk blks, _, (R.Got _ _ _ msg)) ->
+            (R.Downloading mdataSize _ lastBlk blks, _, (R.Got now _ _ _ msg)) ->
                 case R.chooseNextBlk mdataSize lastBlk blks of
                     Nothing ->
                         ( R.Off
@@ -362,7 +385,7 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
                             [ "Not starting seemingly finished download" ]
                         )
                     Just nextBlk ->
-                        R.update (R.Got nextBlk infohash ci msg) rmodel2
+                        R.update (R.Got now nextBlk infohash ci msg) rmodel2
             _ -> R.update m rmodel2
 
         newmodelm = case newmodel of
@@ -376,7 +399,8 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
         details :: R.Msg -> (InfoHash, CompactInfo)
         details (R.DownloadInfo _ i c) = (i, c)
         details (R.GotHandshake i c _) = (i, c)
-        details (R.Got _ i c _) = (i, c)
+        details (R.Got _ _ i c _) = (i, c)
+        details (R.Have _ _ _) = undefined
 
         mergeDls :: R.Model -> R.Model -> R.Model
         mergeDls (R.Downloading _ _ lastBlk blks) (R.Downloading sz msgid _ _)

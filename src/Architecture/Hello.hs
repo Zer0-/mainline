@@ -16,8 +16,8 @@ import Squeal.PostgreSQL
     , values_
     , runQueryParams
     , firstRow
+    , PQ
     )
-import Squeal.PostgreSQL.Pool (PoolPQ)
 
 import Network.KRPC.Helpers (stringpack)
 import Architecture.TEA (dbApp)
@@ -70,7 +70,7 @@ query :: Query_ EmptySchema (Only Float) (Only Float)
 query = values_ $ ((param @1) + (param @1)) `as` #fromOnly
 
 
-session :: Float -> PoolPQ EmptySchema IO Float
+session :: Float -> PQ EmptySchema EmptySchema IO Float
 session i = do
     result <- runQueryParams query (Only i)
     Just (Only ii) <- firstRow result

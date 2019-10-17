@@ -4,6 +4,8 @@
   , OverloadedLabels
   , OverloadedStrings
   , TypeApplications
+  , PatternSynonyms
+  , FlexibleContexts
 #-}
 
 module Mainline.SQL
@@ -12,15 +14,17 @@ module Mainline.SQL
     , connstr
     , queryExists
     , qInfoExists
+    , mInsertInfoDict
     ) where
 
 import Generics.SOP (NP (..))
 import Data.Int (Int32)
 import Data.Maybe (isJust)
 import Data.ByteString (ByteString)
-import Squeal.PostgreSQL.Pool (PoolPQ)
+import Data.Text (Text)
 import Squeal.PostgreSQL
     ( Public
+    , PQ
     , SchemumType (..)
     , (:::)
     , (:=>)
@@ -65,9 +69,35 @@ import Squeal.PostgreSQL
     , firstRow
     , update_
     , Optional (..)
+    , Manipulation
     , Manipulation_
     , manipulateParams_
     , Result
+    , insertInto_
+    , insertInto
+    , QueryClause (..)
+    , Aliased
+    , Grouping (..)
+    , Expression
+    , VarArray (..)
+    , literal
+    , array
+    , pattern Values_
+    , ConflictClause (..)
+    , ReturningClause (..)
+    , with
+    , (!)
+    , Has
+    , CommonTableExpression (..)
+    , Path (..)
+    , pattern Values_
+    , values
+    , values_
+    , crossJoin
+    , Selection (..)
+    , subquery
+    , select
+    , common
     )
 
 connstr :: ByteString
@@ -88,10 +118,12 @@ type MetaInfoConstraints =
     ]
 
 type MetaInfoColumns =
-    '[ "info_id"   ::: 'Def   :=> 'NotNull 'PGint4
-    ,  "info_hash" ::: 'NoDef :=> 'NotNull 'PGbytea
-    ,  "added"     ::: 'Def   :=> 'NotNull 'PGtimestamptz
-    ,  "score"     ::: 'Def   :=> 'NotNull 'PGfloat8
+    '[ "info_id"         ::: 'Def   :=> 'NotNull 'PGint4
+    ,  "info_hash"       ::: 'NoDef :=> 'NotNull 'PGbytea
+    ,  "piece_len_bytes" ::: 'NoDef :=> 'NotNull 'PGint4
+    ,  "name"            ::: 'NoDef :=> 'NotNull 'PGtext
+    ,  "added"           ::: 'Def   :=> 'NotNull 'PGtimestamptz
+    ,  "score"           ::: 'Def   :=> 'NotNull 'PGfloat8
     ]
 
 type FileInfoConstraints =
@@ -121,6 +153,8 @@ setup =
     createTableIfNotExists #meta_info
         (  serial `as` #info_id
         :* ( bytea & notNullable ) `as` #info_hash
+        :* ( integer & notNullable ) `as` #piece_len_bytes
+        :* ( text & notNullable ) `as` #name
         :* ( timestampWithTimeZone
                 & notNullable & default_ currentTimestamp ) `as` #added
         :* ( doublePrecision & notNullable & default_ 0 ) `as` #score
@@ -158,25 +192,97 @@ qInfoExists =
         & where_ (#info_hash .== param @1)
         )
 
-queryExists_ :: ByteString -> PoolPQ Schemas IO (Maybe (Only Int32))
+queryExists_ :: ByteString -> PQ Schemas Schemas IO (Maybe (Only Int32))
 queryExists_ infohash = do
     result <- (runQueryParams qInfoExists (Only infohash))
     firstRow result
 
-queryExists :: ByteString -> PoolPQ Schemas IO Bool
+queryExists :: ByteString -> PQ Schemas Schemas IO Bool
 queryExists infohash = queryExists_ infohash >>= return . isJust
 
-{-
-mIncrementScore :: Manipulation_ Schemas (ByteString, Double) ()
-mIncrementScore =
-    update_ #meta_info
-        (Set (param @1) `as` #score)
-        (#info_hash .== param @2)
 
-incrementScore :: ByteString -> Double -> PoolPQ Schemas IO ()
-incrementScore infohash addscore =
-    manipulateParams_ mIncrementScore (infohash, addscore)
-    -}
+mInsertMetaInfo
+    :: Double
+    -> Manipulation
+        '[]
+        Schemas
+        InfoParamsType
+        '["info_id" ::: 'NotNull 'PGint4]
+mInsertMetaInfo i = insertInto #meta_info
+    ( Values_
+        ( Default `as` #info_id
+        :* Set (param @1)  `as` #info_hash
+        :* Set (param @2)  `as` #piece_len_bytes
+        :* Set (param @3)  `as` #name
+        :* Default         `as` #added
+        :* Set (literal i) `as` #score
+        )
+    )
+    OnConflictDoRaise
+    (Returning (#info_id `as` #info_id))
+
+
+type InfoParamsType =
+   '[ 'NotNull 'PGbytea
+    , 'NotNull 'PGint4
+    , 'NotNull 'PGtext
+    , 'NotNull 'PGbytea
+    ]
+
+type FileParamType =
+   '[ 'NotNull 'PGint4
+    , 'NotNull ('PGvararray ('NotNull 'PGtext))
+    , 'NotNull 'PGint4
+    ]
+
+type FileVal = NP
+    ( Aliased
+        ( Optional
+            ( Expression
+                '[]
+                '[]
+                'Ungrouped
+                Schemas
+                FileParamType
+                '[]
+            )
+        )
+    )
+    FileInfoColumns
+
+
+mInsertFiles
+    :: [(Int32, [Text], Int32)]
+    -> Manipulation_ Schemas (Int32, VarArray [Text], Int32) ()
+mInsertFiles haskValues =
+    insertInto_ #file_info
+        ( Values
+            (mkRow $ head haskValues)
+            (map mkRow $ drop 1 haskValues)
+        )
+
+    where
+        mkRow :: (Int32, [Text], Int32) -> FileVal
+        mkRow (iid, path, size) =
+            (  Set (literal iid) `as` #info_id
+            :* Set (array $ map literal path) `as` #filepath
+            :* Set (literal size) `as` #size_bytes
+            )
+
+mInsertInfoDict
+    :: Double
+    -> ByteString
+    -> Manipulation '[] Schemas InfoParamsType '[]
+mInsertInfoDict score piecesHs =
+    with ((mInsertMetaInfo score) `as` #tmp_info_id) insPieces
+
+    where
+        insPieces = insertInto_ #info_pieces $ Select
+            (  Set (#tmp_info_id ! #info_id) `as` #info_id
+            :* Set (param @4) `as` #pieces
+            )
+            (from (common #tmp_info_id))
+
 
 runSetup :: IO ()
 runSetup = withConnection connstr $ define setup
