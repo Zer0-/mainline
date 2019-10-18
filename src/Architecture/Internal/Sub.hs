@@ -29,7 +29,6 @@ import Control.Concurrent.STM
     , readTVarIO
     , readTVar
     , writeTVar
-    , putTMVar
     )
 
 import Network.KRPC.Types (CompactInfo)
@@ -38,19 +37,16 @@ import Architecture.Internal.Types
     , Program (..)
     , Received (..)
     , TSub (..)
-    , Cmd (..)
     , SubHandler (..)
     , Sub (..)
     )
-import Architecture.Internal.Cmd (runCmds, foldMsgsStm)
+import Architecture.Internal.Cmd (foldMsgsStm, handleCmd)
 import Architecture.Internal.Network
     ( openUDPPort
     , connectTCP
     , ciToAddr
     , addrToCi
     )
-
-import Debug.Trace (trace)
 
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
@@ -191,8 +187,8 @@ subscribe cfg istate key msocket (TCPClient _ ci getMore h failmsg) = do
     case msock of
         Nothing -> do
             putStrLn "in subscribe: opening new TCP socket failed"
-            cmds <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
-            runCmds istate (cfg { init = (tmodel, cmds) })
+            cmd <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
+            handleCmd cfg istate cmd
             return Nothing
         Just sock -> do
             putStrLn "in subscribe: successfully opened new TCP socket"
@@ -233,8 +229,8 @@ runTCPClientSub cfg istate key sock tfns failmsg = do
     case mbytes of
         Nothing -> do
             putStrLn "TCP recv failed"
-            cmds <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
-            runCmds istate (cfg { init = (tmodel, cmds) })
+            cmd <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
+            handleCmd cfg istate cmd
         Just bytes -> do
             putStrLn "TCP read OK, have bytes."
             now <- getPOSIXTime
@@ -324,21 +320,6 @@ runTimerSub cfg istate key ms tHandler = forever $ do
     where
         tmodel = fst (init cfg)
 
-
-handleCmd
-    :: Program model msg schemas
-    -> InternalState msg schemas
-    -> Cmd msg schemas
-    -> IO ()
-handleCmd cfg istate cmd = do
-    runCmds istate cfg { init = (tmodel, cmd) }
-
-    atomically $ do
-        model <- readTVar tmodel
-        putTMVar (subSink istate) ((subscriptions cfg) model)
-
-    where
-        tmodel = fst (init cfg)
 
 mapTSub :: (msg0 -> msg1) -> TSub msg0 -> TSub msg1
 mapTSub f (TCPClient t ci g h e) = TCPClient t ci g (f . h) (f e)

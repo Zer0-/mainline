@@ -10,6 +10,7 @@ module Architecture.Internal.Cmd
     , updateWriters
     , mapTCmd
     , foldMsgsStm
+    , handleCmd
     ) where
 
 import Prelude hiding (init)
@@ -42,6 +43,7 @@ import Control.Concurrent.STM
     , readTVarIO
     , writeTVar
     , modifyTVar
+    , putTMVar
     )
 import Squeal.PostgreSQL (Connection, Pool, usingConnectionPool)
 import Generics.SOP (K (..))
@@ -249,7 +251,7 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
             case msock of
                 Nothing -> do
                     cmds <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
-                    runCmds istate (cfg { init = (tmodel, cmds) })
+                    handleCmd cfg istate cmds
                     return istate
                 Just (sock) -> do
                     (newq, tquit) <- atomically $ do
@@ -367,6 +369,21 @@ foldMsgsStm up msgs tmodel = do
     let (model2, cmds) = foldMsgs up msgs model
     writeTVar tmodel model2
     return cmds
+
+handleCmd
+    :: Program model msg schemas
+    -> InternalState msg schemas
+    -> Cmd msg schemas
+    -> IO ()
+handleCmd cfg istate cmd = do
+    runCmds istate cfg { init = (tmodel, cmd) }
+
+    atomically $ do
+        model <- readTVar tmodel
+        putTMVar (subSink istate) ((subscriptions cfg) model)
+
+    where
+        tmodel = fst (init cfg)
 
 
 merge :: Cmd msg schemas -> (model, Cmd msg schemas) -> (model, Cmd msg schemas)
