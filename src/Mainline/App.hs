@@ -43,9 +43,11 @@ import Data.Torrent
     , LayoutInfo (..)
     )
 
+import Debug.Trace (trace)
+
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 1000
+nMplex = 1
 
 callPerSecondPerCi :: Int
 callPerSecondPerCi = 5
@@ -87,8 +89,8 @@ init =
 
 subscriptions :: Model -> Sub MMsg
 subscriptions mm
-    | indices mainms == [] = Sub.none
-    | isUn (mainms ! 0) = Sub.none
+    | indices mainms == [] = trace "this should never happen" Sub.none
+    | isUn (mainms ! 0) = trace "nothing to sub" Sub.none
     | otherwise = Sub.batch $
         (Sub.up RMsg $ Sub.batch rsubs) :
         [ Sub.udp M.servePort (\ci r -> MMsg $ M.parseReceivedBytes ci r)
@@ -347,6 +349,8 @@ update (MMsg (PeersFoundResult nodeid infohash peers)) model
         newcmds = map (snd . snd) $
             filter (((flip Map.notMember) existingMdls) . fst) rinfo
 
+update (MMsg UDPError) _ = undefined
+
 update (RMsg (R.Have now infohash infodict)) model =
     ( model
         { metadls = Map.delete infohash (metadls model)
@@ -387,6 +391,21 @@ update (RMsg (R.Have now infohash infodict)) model =
             , fromIntegral $ fiLength
             )
 
+update (RMsg (R.TCPError infohash ci)) model =
+    ( model { metadls = newdls }
+    , Cmd.log Cmd.DEBUG [ "Download of ", show infohash
+        ,"from", show ci, "failed" ]
+    )
+    where
+        newdls =
+            Map.update
+                ( \(a, dls) ->
+                    let dls2 = Map.delete ci dls in
+                    if Map.null dls2 then Nothing
+                    else Just (a, dls2)
+                )
+                infohash
+                (metadls model)
 
 update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
 
@@ -430,6 +449,7 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
         details (R.GotHandshake i c _) = (i, c)
         details (R.Got _ _ i c _) = (i, c)
         details (R.Have _ _ _) = undefined
+        details (R.TCPError i c) = (i, c)
 
         mergeDls :: R.Model -> R.Model -> R.Model
         mergeDls (R.Downloading _ _ lastBlk blks) (R.Downloading sz msgid _ _)

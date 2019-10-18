@@ -9,6 +9,7 @@ module Architecture.Internal.Sub
     ) where
 
 import Prelude hiding (init)
+import Control.Exception.Safe (catchIO)
 import Control.Monad (foldM, forever)
 import Data.Foldable (sequence_)
 import qualified Data.Map as Map
@@ -41,13 +42,15 @@ import Architecture.Internal.Types
     , SubHandler (..)
     , Sub (..)
     )
-import Architecture.Internal.Cmd (runCmds)
+import Architecture.Internal.Cmd (runCmds, foldMsgsStm)
 import Architecture.Internal.Network
     ( openUDPPort
     , connectTCP
     , ciToAddr
     , addrToCi
     )
+
+import Debug.Trace (trace)
 
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
@@ -115,11 +118,17 @@ updateSubscriptions (Sub tsubs) cfg istate = do
                     _ -> Map.lookup key (sockets istate)
                 )
                 tsub
-            >>= ( \(msock, threadinfo) -> return $
-                    ( maybe openSocks (\s -> Map.insert key s openSocks) msock
-                    , Map.insert key threadinfo readS
+            >>= maybe
+                    (return (openSocks, readS))
+                    ( \(msock, threadinfo) -> return $
+                        ( maybe
+                            openSocks
+                            (\s -> Map.insert key s openSocks)
+                            msock
+                        , Map.insert key threadinfo readS
+                        )
                     )
-                )
+
 
 updateHandlers
     :: Map.Map Int (SubHandler msg, ThreadId)
@@ -140,7 +149,7 @@ updateHandlers rs tsubs =
 
 
 writeHdlr :: SubHandler msg -> TSub msg -> STM ()
-writeHdlr (TCPClientHandler tv) (TCPClient _ _ getMore h) =
+writeHdlr (TCPClientHandler tv) (TCPClient _ _ getMore h _) =
     writeTVar tv (getMore, h)
 writeHdlr (UDPHandler tv) (UDP _ h) = writeTVar tv h
 writeHdlr (TimerHandler tv) (Timer _ h) = writeTVar tv h
@@ -164,33 +173,46 @@ subscribe
     -> Int
     -> Maybe Socket
     -> TSub msg
-    -> IO (Maybe Socket, (SubHandler msg, ThreadId))
+    -> IO (Maybe (Maybe Socket, (SubHandler msg, ThreadId)))
 subscribe cfg istate key msocket (UDP p h) = do
     th <- atomically (newTVar h)
     sock <- getsock
     threadId <- forkIO (runUDPSub cfg istate key sock th)
-    return (Just sock, (UDPHandler th, threadId))
+    return $ Just (Just sock, (UDPHandler th, threadId))
 
     where
         getsock = case msocket of
             Just s -> return s
             Nothing -> openUDPPort p
 
-subscribe cfg istate key msocket (TCPClient _ ci getMore h) = do
-    th <- atomically (newTVar (getMore, h))
-    sock <- getsock
-    threadId <- forkIO $ runTCPClientSub cfg istate key sock th
-    return (Just sock, (TCPClientHandler th, threadId))
+subscribe cfg istate key msocket (TCPClient _ ci getMore h failmsg) = do
+    msock <- getsock
+
+    case msock of
+        Nothing -> do
+            putStrLn "in subscribe: opening new TCP socket failed"
+            cmds <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
+            runCmds istate (cfg { init = (tmodel, cmds) })
+            return Nothing
+        Just sock -> do
+            putStrLn "in subscribe: successfully opened new TCP socket"
+            th <- atomically (newTVar (getMore, h))
+            threadId <- forkIO $ runTCPClientSub cfg istate key sock th failmsg
+            return $ Just (Just sock, (TCPClientHandler th, threadId))
 
     where
         getsock = case msocket of
-            Just s -> return s
-            Nothing -> connectTCP ci
+            Just s -> return $ Just s
+            Nothing -> catchIO
+                (connectTCP ci >>= return . Just)
+                (\_ -> return Nothing)
+
+        tmodel = fst $ init cfg
 
 subscribe cfg istate key _ (Timer ms h) = do
     th <- atomically (newTVar h)
     threadId <- forkIO $ runTimerSub cfg istate key ms th
-    return (Nothing, (TimerHandler th, threadId))
+    return $ Just (Nothing, (TimerHandler th, threadId))
 
 
 
@@ -200,24 +222,36 @@ runTCPClientSub
     -> Int
     -> Socket
     -> TVar (BS.ByteString -> Int, Received -> msg)
+    -> msg
     -> IO ()
-runTCPClientSub cfg istate key sock tfns = forever $ do
+runTCPClientSub cfg istate key sock tfns failmsg = do
     (getMore, th) <- readTVarIO tfns
-    bytes <- more sock getMore BS.empty
-    now <- getPOSIXTime
+    mbytes <- catchIO
+        ((more sock getMore BS.empty) >>= return . Just)
+        (\_ -> return Nothing)
 
-    cmd <- atomically $ do
-        model <- readTVar tmodel
+    case mbytes of
+        Nothing -> do
+            putStrLn "TCP recv failed"
+            cmds <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
+            runCmds istate (cfg { init = (tmodel, cmds) })
+        Just bytes -> do
+            putStrLn "TCP read OK, have bytes."
+            now <- getPOSIXTime
 
-        let (model2, cmd) = (update cfg) (th (Received bytes now)) model
+            cmd <- atomically $ do
+                model <- readTVar tmodel
 
-        writeTVar tmodel model2
+                let (model2, cmd) = (update cfg) (th (Received bytes now)) model
 
-        updateOwnHandler key (TCPClientHandler tfns) ((subscriptions cfg) model2)
+                writeTVar tmodel model2
 
-        return cmd
+                updateOwnHandler key (TCPClientHandler tfns) ((subscriptions cfg) model2)
 
-    handleCmd cfg istate cmd
+                return cmd
+
+            handleCmd cfg istate cmd
+            runTCPClientSub cfg istate key sock tfns failmsg
 
     where
         tmodel = fst (init cfg)
@@ -307,6 +341,6 @@ handleCmd cfg istate cmd = do
         tmodel = fst (init cfg)
 
 mapTSub :: (msg0 -> msg1) -> TSub msg0 -> TSub msg1
-mapTSub f (TCPClient t ci g h) = TCPClient t ci g (f . h)
-mapTSub f (UDP p h)            = UDP p (\ci -> f . (h ci))
-mapTSub f (Timer ms h)         = Timer ms (f . h)
+mapTSub f (TCPClient t ci g h e) = TCPClient t ci g (f . h) (f e)
+mapTSub f (UDP p h)              = UDP p (\ci -> f . (h ci))
+mapTSub f (Timer ms h)           = Timer ms (f . h)

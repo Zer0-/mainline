@@ -34,3 +34,4 @@ main = simpleApp (undefined, cmd) update (\_ -> Sub.none)
                 servePort
                 seedNodeInfo
                 (stringpack "hello world")
+                (error "connection failed")

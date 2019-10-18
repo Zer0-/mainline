@@ -198,7 +198,7 @@ rparser = do
 
 rdatparser :: Parser ResponseDat
 rdatparser
-    =   peersFound
+    =   try peersFound
     <|> try nodesFound
     <|> (Nodes . parseNodes <$> nodes)
     <|> return Pong
@@ -214,6 +214,10 @@ rdatparser
             return ns
 
         peersFound = do
+            optional (isBs bs_ip >> parseBs)
+            optional (isBs (stringpack "nodes") >> parseBs)
+            optional (isBs (stringpack "p") >> parseInt)
+
             token <- toke
 
             isBs (stringpack "values")
@@ -223,6 +227,8 @@ rdatparser
 
         nodesFound = do
             bs <- isBs (stringpack "nodes") >> parseBs
+
+            optional (isBs (stringpack "p") >> parseInt)
 
             token <- toke
 

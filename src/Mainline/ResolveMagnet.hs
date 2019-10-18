@@ -52,6 +52,7 @@ data Msg
     | GotHandshake InfoHash CompactInfo (Either String BT.Handshake)
     | Got POSIXTime Int InfoHash CompactInfo (Either String BT.Message)
     | Have POSIXTime InfoHash BTT.InfoDict
+    | TCPError InfoHash CompactInfo
 
 
 update :: Msg -> Model -> (Model, Cmd Msg)
@@ -65,7 +66,7 @@ update (DownloadInfo ourid t ci) Off =
             , "from", show ci
             ]
 
-        sendHandshake = Cmd.sendTCP t ci (encode handshake)
+        sendHandshake = Cmd.sendTCP t ci (encode handshake) (TCPError t ci)
 
         handshake = BT.Handshake
             def
@@ -83,7 +84,7 @@ update (GotHandshake t ci handshake) Handshake =
             , show $ encode eshake
             ]
 
-        sendCmd = Cmd.sendTCP t ci (encode eshake)
+        sendCmd = Cmd.sendTCP t ci (encode eshake) (TCPError t ci)
 
         -- TODO: check handshake for supporting BT.ExtExtended
         -- Or just keep going
@@ -237,7 +238,12 @@ update _ Off = (Off, Cmd.none)
 subscriptions :: InfoHash -> CompactInfo -> Model -> Sub Msg
 subscriptions _ _ Off = Sub.none
 subscriptions t ci Handshake =
-    Sub.readTCP t ci numToRead ((GotHandshake t ci) . decode . bytes)
+    Sub.readTCP
+        t
+        ci
+        numToRead
+        ((GotHandshake t ci) . decode . bytes)
+        (TCPError t ci)
 
     where
         numToRead :: ByteString -> Int
@@ -250,7 +256,7 @@ subscriptions t ci Handshake =
             - BS.length bs
 
 subscriptions t ci _ =
-    Sub.readTCP t ci numToRead mkMsg
+    Sub.readTCP t ci numToRead mkMsg (TCPError t ci)
 
     where
         numToRead :: ByteString -> Int
@@ -293,6 +299,7 @@ pieceReq msgid i t ci =
         t
         ci
         (encode (BT.Extended $ BT.EMetadata msgid (BT.MetadataRequest i)))
+        (TCPError t ci)
 
 
 {-

@@ -9,12 +9,14 @@ module Architecture.Internal.Cmd
     , batch
     , updateWriters
     , mapTCmd
+    , foldMsgsStm
     ) where
 
 import Prelude hiding (init)
+import Control.Exception.Safe (catchIO)
 import System.Random (randomIO)
 import Data.Hashable (hash)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromJust)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.ByteString as BS
@@ -55,9 +57,11 @@ import Architecture.Internal.Types
     , InternalState (..)
     )
 
+import Debug.Trace (trace)
+
 execTCmd
     :: TVar (Map Int (CmdQ, a, ThreadId)) -- writeThreadS
-    -> TQueue (TCmd msg schemas)                  -- cmdSink
+    -> TQueue (TCmd msg schemas)          -- cmdSink
     -> Maybe (Pool (K Connection schemas))
     -> TCmd msg schemas
     -> IO (Maybe msg)
@@ -91,8 +95,9 @@ execTCmd _ _ _ (CmdWriteFile filename bs) =
         return (Nothing)
 
 
-execTCmd _ _ _ (CmdSendUDP _ (CompactInfo ip 0) _) =
-    execTCmd undefined undefined undefined $ CmdLog msg
+execTCmd _ _ _ (CmdSendUDP _ (CompactInfo ip 0) _ failmsg) = do
+    _ <- execTCmd undefined undefined undefined $ CmdLog msg
+    return $ Just failmsg
 
     where
         msg = "Error: Cannot send message to " ++ show (CompactInfo ip 0)
@@ -144,12 +149,15 @@ runCmds istate cfg = do
 updateWriters
     :: TCmd msg schemas
     -> InternalState msg schemas
+    -> Program model msg schemas
     -> IO (InternalState msg schemas)
-updateWriters (CmdSendUDP srcPort ci bs) istate =
+updateWriters (CmdSendUDP srcPort ci bs failmsg) istate cfg =
     updateWriters_
         cmd
         istate
+        cfg
         (openUDPPort srcPort)
+        failmsg
         newq
         writeUDPMain
         UDPQueue
@@ -160,13 +168,15 @@ updateWriters (CmdSendUDP srcPort ci bs) istate =
             writeTQueue q (ci, bs)
             return q
 
-        cmd = CmdSendUDP srcPort ci bs
+        cmd = CmdSendUDP srcPort ci bs failmsg
 
-updateWriters (CmdSendTCP t ci bs) istate =
+updateWriters (CmdSendTCP t ci bs failmsg) istate cfg =
     updateWriters_
         cmd
         istate
+        cfg
         (connectTCP ci)
+        failmsg
         newq
         writeTCPMain
         TCPQueue
@@ -177,9 +187,9 @@ updateWriters (CmdSendTCP t ci bs) istate =
             writeTQueue q bs
             return q
 
-        cmd = CmdSendTCP t ci bs
+        cmd = CmdSendTCP t ci bs failmsg
 
-updateWriters (QuitW key) istate = do
+updateWriters (QuitW key) istate _ = do
     atomically $ modifyTVar
         (writeThreadS istate)
         (Map.delete key)
@@ -194,13 +204,15 @@ updateWriters (QuitW key) istate = do
         )
         (Map.lookup key (sockets istate))
 
-updateWriters _ _ = undefined
+updateWriters _ _ _ = undefined
 
 
 updateWriters_
     :: TCmd msg schemas
     -> InternalState msg schemas
+    -> Program model msg schemas
     -> IO Socket
+    -> msg
     -> STM (TQueue a)
     ->
         ( TQueue a
@@ -212,42 +224,59 @@ updateWriters_
         )
     -> (TQueue a -> CmdQ)
     -> IO (InternalState msg schemas)
-updateWriters_ cmd istate getsock getq threadmain initCmdQ = do
+updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
     writers <- readTVarIO (writeThreadS istate)
 
     case Map.lookup key writers of
         (Just (cmdq, _, _)) -> atomically $ enqueueCmd cmdq cmd >> return istate
 
         Nothing -> do
-            (sock, istate2) <- case Map.lookup key (sockets istate) of
-                (Just sock) -> return (sock, istate)
+            (msock, istate2) <- case Map.lookup key (sockets istate) of
+                (Just sock) -> return (Just sock, istate)
 
                 Nothing -> do
-                    sock <- getsock
+                    sock <- trace "Opening new socket" $ catchIO
+                                ( trace "getting new socket successfully" (getsock >>= return . Just))
+                                ( trace "failed getting socket" (\_ -> return Nothing))
                     return
                         ( sock
                         , istate
-                            { sockets = Map.insert key sock (sockets istate)
+                            { sockets =
+                                Map.insert key (fromJust sock) (sockets istate)
                             }
                         )
 
-            (newq, tquit) <- atomically $ do
-                tquit <- newTVar quit
-                newq <- getq
+            case msock of
+                Nothing -> do
+                    cmds <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
+                    runCmds istate (cfg { init = (tmodel, cmds) })
+                    return istate
+                Just (sock) -> do
+                    (newq, tquit) <- atomically $ do
+                        tquit <- newTVar quit
+                        newq <- getq
 
-                return (newq, tquit)
+                        return (newq, tquit)
 
-            threadId <- forkIO (threadmain newq tquit key (cmdSink istate) sock)
+                    threadId <- forkIO
+                                    ( threadmain
+                                        newq
+                                        tquit
+                                        key
+                                        (cmdSink istate)
+                                        sock
+                                    )
 
-            atomically $ modifyTVar
-                (writeThreadS istate2)
-                (Map.insert key (initCmdQ newq, tquit, threadId))
+                    atomically $ modifyTVar
+                        (writeThreadS istate2)
+                        (Map.insert key (initCmdQ newq, tquit, threadId))
 
-            return istate2
+                    return istate2
 
     where
         quit = Map.null (readThreadS istate)
         key = getKey cmd
+        tmodel = fst $ init cfg
 
 
 writeUDPMain
@@ -312,9 +341,9 @@ sinkTCmd writeS sink cmd = do
 
 
 enqueueCmd :: CmdQ -> TCmd msg schemas -> STM ()
-enqueueCmd (UDPQueue q) (CmdSendUDP _ ci bs) = writeTQueue q (ci, bs)
-enqueueCmd (TCPQueue q) (CmdSendTCP _ _ bs)  = writeTQueue q bs
-enqueueCmd _            _                    = undefined
+enqueueCmd (UDPQueue q) (CmdSendUDP _ ci bs _) = writeTQueue q (ci, bs)
+enqueueCmd (TCPQueue q) (CmdSendTCP _ _  bs _) = writeTQueue q bs
+enqueueCmd _            _                      = undefined
 
 
 foldMsgs
@@ -349,9 +378,9 @@ batch cmds = Cmd $ concat [t | (Cmd t) <- cmds]
 
 
 getKey :: TCmd msg schemas -> Int
-getKey (CmdSendUDP srcPort _ _) = hash $ UDP srcPort undefined
-getKey (CmdSendTCP t ci _)      = hash $ TCPClient t ci undefined undefined
-getKey _                        = undefined
+getKey (CmdSendUDP srcPort _ _ _) = hash $ UDP srcPort undefined
+getKey (CmdSendTCP t ci _ _)      = hash $ TCPClient t ci undefined undefined undefined
+getKey _                          = undefined
 
 
 mapTCmd :: (msg0 -> msg1) -> TCmd msg0 schemas -> TCmd msg1 schemas
@@ -359,8 +388,8 @@ mapTCmd _ (CmdLog a)                  = CmdLog a
 mapTCmd f (CmdGetRandom h)            = CmdGetRandom (f . h)
 mapTCmd f (CmdGetTime h)              = CmdGetTime (f . h)
 mapTCmd f (CmdRandomBytes n h)        = CmdRandomBytes n (f . h)
-mapTCmd _ (CmdSendUDP p ci bs)        = CmdSendUDP p ci bs
-mapTCmd _ (CmdSendTCP t ci bs)        = CmdSendTCP t ci bs
+mapTCmd f (CmdSendUDP p ci bs err)    = CmdSendUDP p ci bs (f err)
+mapTCmd f (CmdSendTCP t ci bs err)    = CmdSendTCP t ci bs (f err)
 mapTCmd f (CmdReadFile p h)           = CmdReadFile p (f . h)
 mapTCmd _ (CmdWriteFile p bs)         = CmdWriteFile p bs
 mapTCmd f (CmdDatabase sesh (Just h)) = CmdDatabase sesh (Just $ f . h)

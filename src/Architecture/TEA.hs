@@ -52,7 +52,7 @@ loop self cfg = do
         Nothing -> maybe (return ()) destroyConnectionPool (dbPool self)
         Just thing -> do
             newself <- case thing of
-                (Left tcmd) -> updateWriters tcmd self
+                (Left tcmd) -> updateWriters tcmd self cfg
                 (Right sub) -> updateSubscriptions sub cfg self
 
             loop newself cfg
@@ -120,5 +120,5 @@ dbApp
     -> ByteString
     -> IO ()
 dbApp initial fupdate subs connstr = do
-    pool <- createConnectionPool connstr 1 1 1
+    pool <- createConnectionPool connstr 1 1 10
     run (Just pool) initial fupdate subs

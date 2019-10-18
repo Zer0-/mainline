@@ -50,11 +50,17 @@ randomBytes n f = Cmd [ CmdRandomBytes n f ]
 none :: Cmd msg schemas
 none = Cmd []
 
-sendUDP :: Port -> CompactInfo -> ByteString -> Cmd msg schemas
-sendUDP p dest bs = Cmd [ CmdSendUDP p dest bs ]
+sendUDP :: Port -> CompactInfo -> ByteString -> msg -> Cmd msg schemas
+sendUDP p dest bs err = Cmd [ CmdSendUDP p dest bs err ]
 
-sendTCP :: Hashable t => t -> CompactInfo -> ByteString -> Cmd msg schemas
-sendTCP t ci bs = Cmd [ CmdSendTCP t ci bs ]
+sendTCP
+    :: Hashable t
+    => t
+    -> CompactInfo
+    -> ByteString
+    -> msg
+    -> Cmd msg schemas
+sendTCP t ci bs err = Cmd [ CmdSendTCP t ci bs err ]
 
 getTime :: (POSIXTime -> msg) -> Cmd msg schemas
 getTime f = Cmd [ CmdGetTime f ]

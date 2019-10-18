@@ -35,8 +35,8 @@ data TCmd msg schemas
     | CmdGetRandom (Float -> msg)
     | CmdGetTime (POSIXTime -> msg)
     | CmdRandomBytes Int (BS.ByteString -> msg)
-    | CmdSendUDP Port CompactInfo BS.ByteString
-    | forall t. Hashable t => CmdSendTCP t CompactInfo BS.ByteString
+    | CmdSendUDP Port CompactInfo BS.ByteString msg
+    | forall t. Hashable t => CmdSendTCP t CompactInfo BS.ByteString msg
     | CmdReadFile String (BS.ByteString -> msg)
     | CmdWriteFile String BS.ByteString
     | forall result.
@@ -50,13 +50,13 @@ newtype Cmd msg schemas = Cmd [ TCmd msg schemas ]
 
 data TSub msg
     = forall t. Hashable t =>
-        TCPClient t CompactInfo (BS.ByteString -> Int) (Received -> msg)
+        TCPClient t CompactInfo (BS.ByteString -> Int) (Received -> msg) msg
     | UDP Port (CompactInfo -> Received -> msg)
     | Timer Int (POSIXTime -> msg) -- timeout in milliseconds
 
 
 instance Hashable (TSub msg) where
-    hashWithSalt s (TCPClient t ci _ _) =
+    hashWithSalt s (TCPClient t ci _ _ _) =
         s `hashWithSalt` (1 :: Int) `hashWithSalt` t `hashWithSalt` ci
     hashWithSalt s (UDP p _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` p
     hashWithSalt s (Timer t _) = s `hashWithSalt` (3 :: Int) `hashWithSalt` t

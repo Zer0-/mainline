@@ -125,6 +125,7 @@ data Msg
     | TimeoutTransactions POSIXTime
     | MaintainPeers POSIXTime
     | PeersFoundResult NodeID InfoHash [CompactInfo]
+    | UDPError
 
 data ServerState = ServerState
     { transactions :: Transactions
@@ -225,6 +226,7 @@ update
                     (listenPort conf)
                     sendRecipient
                     (BL.toStrict $ encode kpacket)
+                    UDPError
 
             kpacket = KPacket newtid body Nothing
 
@@ -268,6 +270,7 @@ update
                     (listenPort conf)
                     (compactInfo targetNode)
                     (BL.toStrict bvalue)
+                    UDPError
 
             bvalue = encode kpacket
 
@@ -316,6 +319,7 @@ update (SendResponse { targetNode, body, tid }) (Ready s) =
                 (listenPort $ conf s)
                 (compactInfo targetNode)
                 (BL.toStrict bvalue)
+                UDPError
 
         kpacket = KPacket tid body Nothing
 
@@ -523,6 +527,7 @@ update (SendMessage {}) (Uninitialized1 _ _) = undefined
 update (SendResponse {}) Uninitialized = undefined
 update (SendResponse {}) (Uninitialized1 _ _) = undefined
 update (PeersFoundResult _ _ _) _ = undefined
+update UDPError _ = undefined
 
 {-
 subscriptions :: Model -> Sub Msg
@@ -557,6 +562,7 @@ respond
                     (listenPort (conf state))
                     (compactInfo node)
                     (BL.toStrict $ encode kpacket)
+                    UDPError
 
             cmd = Cmd.batch [log, pong]
 
@@ -586,6 +592,7 @@ respond
                     (listenPort $ conf state)
                     (compactInfo node)
                     (BL.toStrict (encode kpacket))
+                    UDPError
 
             cmd = Cmd.batch [logmsg, nodes]
 
@@ -643,6 +650,7 @@ respond
                     (listenPort $ conf state)
                     (compactInfo node)
                     (BL.toStrict bvalue)
+                    UDPError
 
             kpacket = KPacket tid (Response ourid Pong) Nothing
 
@@ -675,7 +683,7 @@ handleResponse
     | willAdd initialRt node = (newstate, cmds)
     | otherwise = (state, Cmd.none)
         where
-            logmsg = Cmd.log Cmd.INFO [ "Adding to routing table:", show node ]
+            logmsg = Cmd.log Cmd.DEBUG [ "Adding to routing table:", show node ]
             rt = uncheckedAdd initialRt (Node now node)
 
             initialRt = routingTable state
@@ -778,7 +786,7 @@ logErr _ _ state = (state, Cmd.none)
 onParsingErr :: Port -> CompactInfo -> ByteString -> String -> Cmd Msg
 onParsingErr p ci bs err = Cmd.batch [ logParsingErr ci bs err,  logmsg, reply ]
     where
-        reply = Cmd.sendUDP p ci (BL.toStrict $ encode kpacket)
+        reply = Cmd.sendUDP p ci (BL.toStrict $ encode kpacket) UDPError
         kpacket = KPacket empty (Error 203 (stringpack msg)) Nothing
         msg = "Could not parse received message: " ++ err
         logmsg = Cmd.log Cmd.DEBUG [ "Sending", show kpacket , "to", show ci ]
