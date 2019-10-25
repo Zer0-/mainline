@@ -91,10 +91,11 @@ subscriptions :: Model -> Sub MMsg
 subscriptions mm
     | indices mainms == [] = trace "this should never happen" Sub.none
     | isUn (mainms ! 0) = trace "nothing to sub" Sub.none
-    | otherwise = Sub.batch $
+    | otherwise = trace ("t rsubs size: " ++ (show $ length rsubs)) $
+        Sub.batch $
         (Sub.up RMsg $ Sub.batch rsubs) :
         [ Sub.udp M.servePort (\ci r -> MMsg $ M.parseReceivedBytes ci r)
-        , Sub.timer 100 ProcessQueue
+        , Sub.timer 500 ProcessQueue
         , Sub.timer (60 * 1000) (\t -> MMsg $ M.TimeoutTransactions t)
         , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ M.MaintainPeers t)
         ]
@@ -134,7 +135,7 @@ update
         mm
     | otherwise = updateExplicit msg mm (fst $ head havet)
         where
-            m = models mm
+            m = trace "t App - Inbound Response" $ models mm
             msg = Inbound t ci (KPacket transactionId (Response nodeid r) v)
 
             havet = filter (fil . snd) (assocs m)
@@ -168,7 +169,7 @@ update
     mm = (model { haves = newHaves }, Cmd.batch [ cmds, cmds2 ])
 
     where
-        msg = Inbound now ci (KPacket transactionId (Query nodeid q) v)
+        msg = trace "t App - process inbound AnnouncePeer" $ Inbound now ci (KPacket transactionId (Query nodeid q) v)
         q = AnnouncePeer impliedPort infohash port token mname
         idx = queryToIndex (Query nodeid q) mm
         (model, cmds) = updateExplicit msg mm idx
@@ -311,7 +312,7 @@ update (MMsg (MaintainPeers now)) m =
 
 update (MMsg (PeersFoundResult nodeid infohash peers)) model
     | Map.member infohash dls =
-        ( model { metadls = Map.insert infohash (newMdls) dls }
+        ( model { metadls = Map.insert infohash newMdls dls }
         , Cmd.up RMsg (Cmd.batch newcmds)
         )
     | otherwise =
@@ -497,7 +498,7 @@ queryToIndex _ _ = undefined
 
 
 updateExplicit :: M.Msg -> Model -> Int -> (Model, Cmd MMsg)
-updateExplicit msg model ix =
+updateExplicit msg model ix = trace ("t App.updateExplicit model " ++ show ix) $
     ( model { models = m // [(ix, mm)] }
     , Cmd.up MMsg cmds
     )
@@ -554,8 +555,8 @@ throttle cache key now cps =
         (_, Nothing) -> Right cache2
         (_, Just time) ->
             if now - time < (fromInteger 1) / (fromIntegral cps)
-            then Left cache2
-            else Right cache2
+            then trace "t throttle says queue it" $ Left cache2
+            else trace "t hrottle says go" $ Right cache2
     where
         cache2 = insert key now cache
 

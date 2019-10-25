@@ -33,6 +33,8 @@ import qualified Architecture.Sub as Sub
 import qualified Architecture.Cmd as Cmd
 import Mainline.Mainline (Cmd)
 
+import Debug.Trace (trace, traceShowId)
+
 metadataBlocksize :: Int
 metadataBlocksize = 16384
 
@@ -46,6 +48,12 @@ data Model
         , lastBlkRequested :: Int
         , blocks :: Map Int ByteString
         }
+
+instance Show Model where
+    show Off = "Off"
+    show Handshake = "Handshake"
+    show ExtensionHandshake = "ExtensionHandshake"
+    show (Downloading _ _ _ _) = "Downloading"
 
 data Msg
     = DownloadInfo NodeID InfoHash CompactInfo
@@ -80,6 +88,7 @@ update (GotHandshake t ci handshake) Handshake =
     where
         logmsg = Cmd.log Cmd.DEBUG
             [ "Have handshake:", show handshake
+            , "from", show ci
             ,"Will send:", show eshake
             , show $ encode eshake
             ]
@@ -122,11 +131,10 @@ update
                 [ "Could not get size from handshake response." ]
 
             logmsg = Cmd.log Cmd.DEBUG
-                [
-                "Have size from extended handshake:"
-                , show msize
-                , "supports extensions:"
-                , show exts
+                [ "Have extended handshake from", show ci
+                , "Have size:", show msize
+                , "supports extensions:", show exts
+                , "requesting piece", show firstBlk
                 ]
 
             mExtmMsgId = Map.lookup BT.ExtMetadata (BT.extendedCaps exts)
@@ -227,7 +235,7 @@ update
 update (GotHandshake _ _ have) _ = (Off, logmsg)
     where
         logmsg = Cmd.log
-            Cmd.INFO
+            Cmd.WARNING
             [ "Got unknown response from server:"
             , show have
             ]
@@ -237,7 +245,7 @@ update _ Off = (Off, Cmd.none)
 
 subscriptions :: InfoHash -> CompactInfo -> Model -> Sub Msg
 subscriptions _ _ Off = Sub.none
-subscriptions t ci Handshake =
+subscriptions t ci Handshake = trace "t sub: read constant" $
     Sub.readTCP
         t
         ci
@@ -256,19 +264,23 @@ subscriptions t ci Handshake =
             - BS.length bs
 
 subscriptions t ci _ =
-    Sub.readTCP t ci numToRead mkMsg (TCPError t ci)
+    trace "t sub: read variable number" $
+        Sub.readTCP t ci numToRead mkMsg (TCPError t ci)
 
     where
         numToRead :: ByteString -> Int
         numToRead bs
-            | BS.length bs < 4 = 4
-            | otherwise = (expectedLen (BS.take 4 bs)) - (BS.length bs) + 4
+            | BS.length bs < 4 = trace "t read 4 bytes" 4
+            | otherwise = traceShowId $
+                (expectedLen (BS.take 4 bs)) - (BS.length bs) + 4
 
         expectedLen :: ByteString -> Int
         expectedLen b = fromIntegral ((fromByteString b) :: Word32)
 
         mkMsg :: Received -> Msg
-        mkMsg Received { bytes, time } = Got time 0 t ci (decode bytes)
+        mkMsg Received { bytes, time } =
+            trace ("t Have Got message from " ++ show ci) $
+                Got time 0 t ci (decode bytes)
 
 
 numBlks :: Int -> Int
@@ -282,7 +294,6 @@ chooseNextBlk metadataSize lastBlkRequested haveblks =
     else
         if lastBlkRequested >= nblks - 1 || Map.member nxt haveblks
         then Just $
-            -- would it be better to use set complement here?
             head $ filter ((flip Map.notMember) haveblks) [0..nblks - 1]
         else Just nxt
 

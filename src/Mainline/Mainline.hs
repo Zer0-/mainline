@@ -63,6 +63,8 @@ import Network.KRPC.Types
     )
 import Mainline.SQL (Schemas);
 
+import Debug.Trace (trace)
+
 type Cmd msg = Cmd.Cmd msg Schemas
 
 {- Constants -}
@@ -71,12 +73,12 @@ servePort :: Port
 servePort = 51416
 
 seedNodePort :: Port
-seedNodePort = 6881
---seedNodePort = 51413
+--seedNodePort = 6881
+seedNodePort = 51413
 
 seedNodeHost :: Word32
-seedNodeHost = fromOctets [ 82, 221, 103, 244 ]
---seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
+--seedNodeHost = fromOctets [ 82, 221, 103, 244 ]
+seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
 --seedNodeHost = fromOctets [ 67, 215, 246, 10 ]
 
 seedNodeInfo :: CompactInfo
@@ -240,7 +242,7 @@ update
         , newtid
         , when
         }
-    (Ready (ServerState { transactions, conf, routingTable })) =
+    (Ready (ServerState { transactions, conf, routingTable })) = trace "t Have random bytes for sending message" $
         ( Ready ServerState
             { transactions = trsns
             , conf
@@ -285,7 +287,7 @@ update
         client
         (KPacket { message = Response nodeid Pong })
     )
-    (Uninitialized1 conf _) = (model, warmup)
+    (Uninitialized1 conf _) = trace "t Mainline - replying to pong" $ (model, warmup)
         where
             model = Ready ServerState
                 { transactions = Map.empty
@@ -804,7 +806,7 @@ logParsingErr ci bs err =
 
     where
         scnr = either
-            (\_ -> [])
+            (const [])
             (\bval -> ["scanner:", show $ scanner bval])
             (decode bs)
 
@@ -856,8 +858,8 @@ considerNode now state node
 parseReceivedBytes :: CompactInfo -> Received -> Msg
 parseReceivedBytes compactinfo (Received { bytes, time }) =
     case decode bytes of
-        Right kpacket -> Inbound time compactinfo kpacket
-        Left msg -> ErrorParsing compactinfo bytes msg
+        Right kpacket -> trace "t parseReceivedBytes - have Inbound" $ Inbound time compactinfo kpacket
+        Left msg -> trace "t parseReceivedBytes have ErrorParsing" $ ErrorParsing compactinfo bytes msg
 
 
 getMTstate :: NodeID -> Transactions -> ByteString -> Maybe TransactionState

@@ -38,9 +38,12 @@ import Architecture.Internal.Types
     )
 import Architecture.Internal.Sub (updateSubscriptions)
 
+import Debug.Trace (trace)
 
 loop :: InternalState msg schemas -> Program model msg schemas -> IO ()
 loop self cfg = do
+    putStrLn "Loop"
+
     mthing <- atomically $ do
         writeS <- readTVar (writeThreadS self)
 
@@ -51,15 +54,28 @@ loop self cfg = do
     case mthing of
         Nothing -> maybe (return ()) destroyConnectionPool (dbPool self)
         Just thing -> do
+            putStrLn "Loop has thing"
             newself <- case thing of
-                (Left tcmd) -> updateWriters tcmd self cfg
-                (Right sub) -> updateSubscriptions sub cfg self
+                -- here in updateWriters, if handleCmd is called we try to putTMVar
+                -- and if the TMVar is full there is nothing to take the TMVar from anyway.
+                --
+                -- maybe better to getSocket in a thread, have the socket map be TVar'd
+                (Left tcmd) -> trace "t mainloop updateWriters" $ updateWriters tcmd self cfg
+                (Right sub) -> trace "t mainloop updateSubscriptions" $ updateSubscriptions sub cfg self
+
+            -- I guess since we get:
+            --     Mainline: thread blocked indefinitely in an STM transaction
+            -- before "looping" is printed, this means the failure is between
+            -- "Loop has thing" and here.
+            --
+            -- - trace every atomically block?
+            putStrLn "looping"
 
             loop newself cfg
 
     where
-        lexpr = readTQueue (cmdSink self) >>= return . Left
-        rexpr = takeTMVar (subSink self) >>= return . Right
+        lexpr = trace "t mainloop - read TQueue" $ readTQueue (cmdSink self) >>= return . Left
+        rexpr = trace "t mainloop - read TMVar" $ takeTMVar (subSink self) >>= return . Right
         getThing = (lexpr `orElse` rexpr) >>= return . Just
 
 
