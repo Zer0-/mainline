@@ -39,10 +39,9 @@ import Architecture.Internal.Types
     , TSub (..)
     , SubHandler (..)
     , Sub (..)
-    , Cmd (..)
     , SocketMood (..)
     )
-import Architecture.Internal.Cmd (foldMsgsStm, runCmds, handleCmd)
+import Architecture.Internal.Cmd (foldMsgsStm, handleCmd)
 import Architecture.Internal.Network
     ( openUDPPort
     , connectTCP
@@ -51,7 +50,7 @@ import Architecture.Internal.Network
     , openSocket
     )
 
-import Debug.Trace (trace)
+-- import Debug.Trace (trace)
 
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
@@ -103,6 +102,9 @@ updateSubscriptions (Sub tsubs) cfg istate = do
         newstate = istate
             { readThreadS = Map.union loaded (currentReads `Map.difference` unloads)
             , sockets =
+                -- the sockets restrictKeys statement needs to be further restricted
+                -- to exclude the WantReads that we are keeping. We need these
+                -- for the main thread to look up once they are done.
                 newsocks `Map.union` ((sockets istate) `Map.withoutKeys` toClose)
             }
 
@@ -374,6 +376,9 @@ runTimerSub cfg istate key ms tHandler = forever $ do
 
 closeSocketMood :: SocketMood msg schemas -> IO ()
 closeSocketMood (HaveSocket sock) = close sock
+closeSocketMood (WantWrites _) = return ()
+closeSocketMood (WantReads t _) = killThread t
+closeSocketMood (WantBoth _) = return ()
 
 
 mapTSub :: (msg0 -> msg1) -> TSub msg0 -> TSub msg1

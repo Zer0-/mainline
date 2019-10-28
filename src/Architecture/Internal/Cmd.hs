@@ -14,10 +14,9 @@ module Architecture.Internal.Cmd
     ) where
 
 import Prelude hiding (init)
-import Control.Exception.Safe (catchIO)
 import System.Random (randomIO)
 import Data.Hashable (hash)
-import Data.Maybe (catMaybes, fromJust)
+import Data.Maybe (catMaybes)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.ByteString as BS
@@ -259,7 +258,7 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
                             (sockets istate)
                         }
                     )
-                Just (WantReads threadid tsub) -> return
+                Just (WantReads _ tsub) -> return
                     ( Nothing
                     , istate
                         { sockets = Map.insert
@@ -474,4 +473,5 @@ mapTCmd _ (CmdWriteFile p bs)         = CmdWriteFile p bs
 mapTCmd f (CmdDatabase sesh (Just h)) = CmdDatabase sesh (Just $ f . h)
 mapTCmd _ (CmdDatabase sesh Nothing)  = CmdDatabase sesh Nothing
 mapTCmd f (CmdBounce m)               = CmdBounce (f m)
+mapTCmd _ (SocketResult i ms)         = SocketResult i ms
 mapTCmd _ (QuitW i)                   = QuitW i
