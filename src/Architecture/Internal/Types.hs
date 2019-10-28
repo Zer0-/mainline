@@ -14,6 +14,7 @@ module Architecture.Internal.Types
     , Sub (..)
     , Program (..)
     , CmdQ (..)
+    , SocketMood (..)
     ) where
 
 import Data.Map (Map)
@@ -42,6 +43,7 @@ data TCmd msg schemas
     | forall result.
         CmdDatabase (PQ schemas schemas IO result) (Maybe (result -> msg))
     | CmdBounce msg
+    | SocketResult Int (Maybe Socket)
     | QuitW Int
 
 
@@ -92,11 +94,17 @@ data SubHandler msg
     | UDPHandler (TVar (CompactInfo -> Received -> msg))
     | TimerHandler (TVar (POSIXTime -> msg))
 
+data SocketMood msg schemas
+    = WantWrites [TCmd msg schemas]
+    | WantReads ThreadId (TSub msg)
+    | WantBoth ([TCmd msg schemas], TSub msg)
+    | HaveSocket Socket
+
 
 data InternalState msg schemas = InternalState
     { readThreadS  :: Map Int (SubHandler msg, ThreadId)
     , writeThreadS :: TVar (Map Int (CmdQ, TVar Bool, ThreadId))
-    , sockets      :: Map Int Socket
+    , sockets      :: Map Int (SocketMood msg schemas)
     , dbPool       :: Maybe (Pool (K Connection schemas))
     , subSink      :: TMVar (Sub msg)
     , cmdSink      :: TQueue (TCmd msg schemas)

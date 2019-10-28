@@ -3,6 +3,7 @@ module Architecture.Internal.Network
     , connectTCP
     , addrToCi
     , ciToAddr
+    , openSocket
     ) where
 
 import Network.Socket
@@ -22,9 +23,12 @@ import Network.Socket
     , hostAddressToTuple
     , tupleToHostAddress
     )
+import Control.Concurrent.STM (TQueue, atomically, writeTQueue)
+import Control.Exception.Safe (catchIO)
 
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
 import Network.Octets (fromOctets, octets)
+import Architecture.Internal.Types(TCmd (..))
 
 openUDPPort :: Port -> IO Socket
 openUDPPort = bindSocket Datagram
@@ -76,3 +80,23 @@ connectTCP ci = do
     sock <- socket AF_INET Stream defaultProtocol
     connect sock (ciToAddr ci)
     return sock
+
+
+openSocket
+    :: Int
+    -> IO Socket
+    -> TQueue (TCmd msg schemas)
+    -> IO ()
+    -> IO ()
+openSocket key getSock cmdSink onError = do
+    msock <- catchIO
+                (getSock >>= return . Just)
+                (\_ -> return Nothing)
+
+    case msock of
+        Just sock ->
+            atomically $ writeTQueue cmdSink (SocketResult key (Just sock))
+        Nothing -> do
+            atomically $ writeTQueue cmdSink (SocketResult key Nothing)
+            onError
+

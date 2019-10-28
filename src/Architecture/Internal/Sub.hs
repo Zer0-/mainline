@@ -29,7 +29,6 @@ import Control.Concurrent.STM
     , readTVarIO
     , readTVar
     , writeTVar
-    , putTMVar
     )
 
 import Network.KRPC.Types (CompactInfo)
@@ -41,13 +40,15 @@ import Architecture.Internal.Types
     , SubHandler (..)
     , Sub (..)
     , Cmd (..)
+    , SocketMood (..)
     )
-import Architecture.Internal.Cmd (foldMsgsStm, runCmds)
+import Architecture.Internal.Cmd (foldMsgsStm, runCmds, handleCmd)
 import Architecture.Internal.Network
     ( openUDPPort
     , connectTCP
     , ciToAddr
     , addrToCi
+    , openSocket
     )
 
 import Debug.Trace (trace)
@@ -96,13 +97,14 @@ updateSubscriptions (Sub tsubs) cfg istate = do
 
     let toClose = fullClosed writeS
 
-    mapM_ close ((sockets istate) `Map.restrictKeys` toClose)
+    mapM_ closeSocketMood ((sockets istate) `Map.restrictKeys` toClose)
 
-    let newstate =
-                    istate { readThreadS = Map.union loaded (currentReads `Map.difference` unloads)
-                    , sockets =
-                        newsocks `Map.union` ((sockets istate) `Map.withoutKeys` toClose)
-                    }
+    let
+        newstate = istate
+            { readThreadS = Map.union loaded (currentReads `Map.difference` unloads)
+            , sockets =
+                newsocks `Map.union` ((sockets istate) `Map.withoutKeys` toClose)
+            }
 
     putStrLn $ show (Map.size $ readThreadS newstate) ++ "read threads (after)"
 
@@ -134,16 +136,21 @@ updateSubscriptions (Sub tsubs) cfg istate = do
                     _ -> Map.lookup key (sockets istate)
                 )
                 tsub
-            >>= maybe
-                    (return (openSocks, readS))
-                    ( \(msock, threadinfo) -> return $
-                        ( maybe
-                            openSocks
-                            (\s -> Map.insert key s openSocks)
-                            msock
-                        , Map.insert key threadinfo readS
-                        )
-                    )
+            >>=
+                return . ( \(msocketm, mread) -> do
+                    let newSocks s = Map.insert key s openSocks
+                    let newReadS r = Map.insert key r readS
+
+                    case msocketm of
+                        Just sm ->
+                            case mread of
+                                Just r -> (newSocks sm, newReadS r)
+                                Nothing -> (newSocks sm, readS)
+                        Nothing ->
+                            case mread of
+                                Just r -> (openSocks, newReadS r)
+                                Nothing -> (openSocks, readS)
+                )
 
 
 updateHandlers
@@ -187,49 +194,64 @@ subscribe
     :: Program model msg schemas
     -> InternalState msg schemas
     -> Int
-    -> Maybe Socket
+    -> Maybe (SocketMood msg schemas)
     -> TSub msg
-    -> IO (Maybe (Maybe Socket, (SubHandler msg, ThreadId)))
+    -> IO (Maybe (SocketMood msg schemas), Maybe (SubHandler msg, ThreadId))
 subscribe cfg istate key msocket (UDP p h) = do
     th <- atomically (newTVar h)
     sock <- getsock
     threadId <- forkIO (runUDPSub cfg istate key sock th)
-    return $ Just (Just sock, (UDPHandler th, threadId))
+    return (Just $ HaveSocket sock, Just (UDPHandler th, threadId))
 
     where
         getsock = case msocket of
-            Just s -> return s
+            Just (HaveSocket s) -> return s
+            Just _ -> error "udp sockets expected to open synchronously"
             Nothing -> openUDPPort p
 
-subscribe cfg istate key msocket (TCPClient _ ci getMore h failmsg) = do
-    msock <- getsock
-
-    case msock of
-        Nothing -> do
-            putStrLn "in subscribe: opening new TCP socket failed"
-            cmd <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
-            handleCmd cfg istate cmd
-            return Nothing
-        Just sock -> do
-            putStrLn "in subscribe: opening new TCP socket succeeded"
+subscribe cfg istate key msocket (TCPClient t ci getMore h failmsg) =
+    case msocket of
+        Just (HaveSocket sock) -> do
             th <- atomically (newTVar (getMore, h))
+            putStrLn "subscribe - spawning new TCP read thread."
             threadId <- forkIO $ runTCPClientSub cfg istate key sock th failmsg
-            return $ Just (Just sock, (TCPClientHandler th, threadId))
+            return (Just $ HaveSocket sock, Just (TCPClientHandler th, threadId))
+
+        Just (WantWrites tcmdq) ->
+            return (Just $ WantBoth (tcmdq, tsub), Nothing)
+
+        Just (WantReads threadid _) ->
+            return (Just $ WantReads threadid tsub, Nothing)
+
+        Just (WantBoth (tcmdq, _)) ->
+            return (Just $ WantBoth (tcmdq, tsub), Nothing)
+
+        Nothing -> do
+            threadid <- forkIO $ openSocket
+                key
+                (connectTCP ci)
+                (cmdSink istate)
+                onFail
+
+            -- do we need need the TSub in SocketMood state? We do need the
+            -- list of queued up Cmds.
+
+            return (Just $ WantReads threadid tsub, Nothing)
 
     where
-        getsock = case msocket of
-            Just s -> return $ Just s
-            Nothing -> catchIO
-                (connectTCP ci >>= return . Just)
-                (const $ return Nothing)
+        tsub = TCPClient t ci getMore h failmsg
 
         tmodel = fst $ init cfg
+
+        onFail = do
+            cmd <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
+            handleCmd cfg istate cmd
+
 
 subscribe cfg istate key _ (Timer ms h) = do
     th <- atomically (newTVar h)
     threadId <- forkIO $ runTimerSub cfg istate key ms th
-    return $ Just (Nothing, (TimerHandler th, threadId))
-
+    return $ (Nothing, Just $ (TimerHandler th, threadId))
 
 
 runTCPClientSub
@@ -350,25 +372,8 @@ runTimerSub cfg istate key ms tHandler = forever $ do
         tmodel = fst (init cfg)
 
 
-handleCmd
-    :: Program model msg schemas
-    -> InternalState msg schemas
-    -> Cmd msg schemas
-    -> IO ()
-handleCmd cfg istate cmd = do
-    putStrLn "handleCmd - top, going runCmds"
-    runCmds istate cfg { init = (tmodel, cmd) }
-
-    putStrLn "handleCmd - ran runCmds, writing new subscriptions"
-
-    atomically $ do
-        model <- trace "t handleCmd reading tmodel tvar" $ readTVar tmodel
-        trace "t handleCmd wrote subs TMVar" $ putTMVar (subSink istate) ((subscriptions cfg) model)
-
-    putStrLn "handleCmd - done."
-
-    where
-        tmodel = fst (init cfg)
+closeSocketMood :: SocketMood msg schemas -> IO ()
+closeSocketMood (HaveSocket sock) = close sock
 
 
 mapTSub :: (msg0 -> msg1) -> TSub msg0 -> TSub msg1

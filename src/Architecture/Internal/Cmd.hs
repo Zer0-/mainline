@@ -10,6 +10,7 @@ module Architecture.Internal.Cmd
     , updateWriters
     , mapTCmd
     , foldMsgsStm
+    , handleCmd
     ) where
 
 import Prelude hiding (init)
@@ -42,12 +43,18 @@ import Control.Concurrent.STM
     , readTVarIO
     , writeTVar
     , modifyTVar
+    , putTMVar
     )
 import Squeal.PostgreSQL (Connection, Pool, usingConnectionPool)
 import Generics.SOP (K (..))
 
 import Network.KRPC.Types (CompactInfo (CompactInfo))
-import Architecture.Internal.Network (openUDPPort, ciToAddr, connectTCP)
+import Architecture.Internal.Network
+    ( openUDPPort
+    , ciToAddr
+    , connectTCP
+    , openSocket
+    )
 import Architecture.Internal.Types
     ( Cmd (..)
     , TCmd (..)
@@ -55,6 +62,7 @@ import Architecture.Internal.Types
     , CmdQ (..)
     , Program (..)
     , InternalState (..)
+    , SocketMood (..)
     )
 
 import Debug.Trace (trace)
@@ -203,11 +211,15 @@ updateWriters (QuitW key) istate _ = do
     then return istate
     else maybe
         (return istate)
-        (\socket ->
-            close socket
-            >> return istate { sockets = Map.delete key (sockets istate) }
-        )
+        closeSocket
         (Map.lookup key (sockets istate))
+
+
+    where
+        closeSocket (HaveSocket socket) = close socket >> return withoutKey
+        closeSocket _ = error "QuitW cmd for thread with uninitialized socket"
+
+        withoutKey = istate { sockets = Map.delete key (sockets istate) }
 
 updateWriters _ _ _ = undefined
 
@@ -237,30 +249,53 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
 
         Nothing -> do
             (msock, istate2) <- case Map.lookup key (sockets istate) of
-                (Just sock) -> return (Just sock, istate)
-
+                Just (HaveSocket sock) -> return (Just sock, istate)
+                Just (WantWrites tcmdq) -> return
+                    ( Nothing
+                    , istate
+                        { sockets = Map.insert
+                            key
+                            (WantWrites (tcmdq ++ [cmd]))
+                            (sockets istate)
+                        }
+                    )
+                Just (WantReads threadid tsub) -> return
+                    ( Nothing
+                    , istate
+                        { sockets = Map.insert
+                            key
+                            (WantBoth ([cmd], tsub))
+                            (sockets istate)
+                        }
+                    )
+                Just (WantBoth (tcmdq, tsub)) -> return
+                    ( Nothing
+                    , istate
+                        { sockets = Map.insert
+                            key
+                            (WantBoth (tcmdq ++ [cmd], tsub))
+                            (sockets istate)
+                        }
+                    )
                 Nothing -> do
-                    putStrLn "Opening new socket" 
+                    _ <- forkIO $ openSocket
+                        key
+                        getsock
+                        (cmdSink istate)
+                        onFail
 
-                    sock <- catchIO
-                                (getsock >>= return . Just)
-                                (trace "t failed getting socket" (\_ -> return Nothing))
                     return
-                        ( sock
+                        ( Nothing
                         , istate
-                            { sockets =
-                                Map.insert key (fromJust sock) (sockets istate)
+                            { sockets = Map.insert
+                                key
+                                (WantWrites [cmd])
+                                (sockets istate)
                             }
                         )
 
             case msock of
-                Nothing -> do
-                    putStrLn "updateWriters_ failed to get a new socket (writing)"
-                    cmds <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
-                    putStrLn "updateWriters_ have cmds for failmsg"
-                    runCmds istate cfg { init = (fst (init cfg), cmds) }
-                    putStrLn "updateWriters_ runCmds done, returning"
-                    return istate
+                Nothing -> return istate2
                 Just (sock) -> do
                     putStrLn "have just msock (new writer socket)"
 
@@ -293,6 +328,10 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
         quit = Map.null (readThreadS istate)
         key = getKey cmd
         tmodel = fst $ init cfg
+        onFail = do
+            cmd_ <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
+            handleCmd cfg istate cmd_
+
 
 
 writeUDPMain
@@ -328,8 +367,6 @@ runMain
     -> (a -> IO ())
     -> IO ()
 runMain q quit key qsink sock fsend = do
-    -- STUCK HERE!! - of course it's stuck here,
-    -- there are no sub threads.
     putStrLn $ show key ++ " runMain - top"
     msend <- atomically $ lexpr `orElse` rexpr
 
@@ -388,6 +425,27 @@ foldMsgsStm up msgs tmodel = do
     let (model2, cmds) = foldMsgs up msgs model
     writeTVar tmodel model2
     return cmds
+
+
+handleCmd
+    :: Program model msg schemas
+    -> InternalState msg schemas
+    -> Cmd msg schemas
+    -> IO ()
+handleCmd cfg istate cmd = do
+    putStrLn "handleCmd - top, going runCmds"
+    runCmds istate cfg { init = (tmodel, cmd) }
+
+    putStrLn "handleCmd - ran runCmds, writing new subscriptions"
+
+    atomically $ do
+        model <- trace "t handleCmd reading tmodel tvar" $ readTVar tmodel
+        trace "t handleCmd wrote subs TMVar" $ putTMVar (subSink istate) ((subscriptions cfg) model)
+
+    putStrLn "handleCmd - done."
+
+    where
+        tmodel = fst (init cfg)
 
 
 merge :: Cmd msg schemas -> (model, Cmd msg schemas) -> (model, Cmd msg schemas)
