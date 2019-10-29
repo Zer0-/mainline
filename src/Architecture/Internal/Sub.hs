@@ -1,4 +1,4 @@
-{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE NamedFieldPuns, LambdaCase #-}
 
 module Architecture.Internal.Sub
     ( Received (..)
@@ -94,7 +94,17 @@ updateSubscriptions (Sub tsubs) cfg istate = do
     putStrLn $ "updateSubscriptions unloading (killing) " ++ (show $ Map.size unloads) ++ " subs"
     mapM_ killThread (Map.map snd unloads)
 
-    let toClose = fullClosed writeS
+    let
+        toClose = Set.filter
+            ((\case
+                WantWrites _  -> False
+                WantReads _ _ -> True
+                WantBoth _    -> False
+                HaveSocket _  -> True
+            ) . ((Map.!) (sockets istate)))
+            (fullClosed writeS)
+
+    -- should the SocketMood WantBoth be changed to WantWrites if it's in fullClosed?
 
     mapM_ closeSocketMood ((sockets istate) `Map.restrictKeys` toClose)
 
@@ -102,9 +112,6 @@ updateSubscriptions (Sub tsubs) cfg istate = do
         newstate = istate
             { readThreadS = Map.union loaded (currentReads `Map.difference` unloads)
             , sockets =
-                -- the sockets restrictKeys statement needs to be further restricted
-                -- to exclude the WantReads that we are keeping. We need these
-                -- for the main thread to look up once they are done.
                 newsocks `Map.union` ((sockets istate) `Map.withoutKeys` toClose)
             }
 
