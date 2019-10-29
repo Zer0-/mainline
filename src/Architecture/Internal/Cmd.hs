@@ -250,32 +250,11 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
             (msock, istate2) <- case Map.lookup key (sockets istate) of
                 Just (HaveSocket sock) -> return (Just sock, istate)
                 Just (WantWrites tcmdq) -> return
-                    ( Nothing
-                    , istate
-                        { sockets = Map.insert
-                            key
-                            (WantWrites (tcmdq ++ [cmd]))
-                            (sockets istate)
-                        }
-                    )
+                    (Nothing, putsockm (WantWrites (tcmdq ++ [cmd])))
                 Just (WantReads _ tsub) -> return
-                    ( Nothing
-                    , istate
-                        { sockets = Map.insert
-                            key
-                            (WantBoth ([cmd], tsub))
-                            (sockets istate)
-                        }
-                    )
+                    (Nothing, putsockm (WantBoth ([cmd], tsub)))
                 Just (WantBoth (tcmdq, tsub)) -> return
-                    ( Nothing
-                    , istate
-                        { sockets = Map.insert
-                            key
-                            (WantBoth (tcmdq ++ [cmd], tsub))
-                            (sockets istate)
-                        }
-                    )
+                    (Nothing, putsockm (WantBoth (tcmdq ++ [cmd], tsub)))
                 Nothing -> do
                     _ <- forkIO $ openSocket
                         key
@@ -283,15 +262,7 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
                         (cmdSink istate)
                         onFail
 
-                    return
-                        ( Nothing
-                        , istate
-                            { sockets = Map.insert
-                                key
-                                (WantWrites [cmd])
-                                (sockets istate)
-                            }
-                        )
+                    return (Nothing, putsockm (WantWrites [cmd]))
 
             case msock of
                 Nothing -> return istate2
@@ -330,6 +301,8 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
         onFail = do
             cmd_ <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
             handleCmd cfg istate cmd_
+
+        putsockm s = istate { sockets = Map.insert key s (sockets istate) }
 
 
 

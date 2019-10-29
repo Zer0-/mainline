@@ -28,6 +28,7 @@ import Generics.SOP (K (..))
 import Squeal.PostgreSQL.Pool (Pool, createConnectionPool, destroyConnectionPool)
 import Squeal.PostgreSQL (Connection)
 import Data.ByteString (ByteString)
+import Network.Socket (close)
 
 import Architecture.Internal.Cmd (runCmds, updateWriters)
 import Architecture.Internal.Types
@@ -35,6 +36,8 @@ import Architecture.Internal.Types
     , Cmd (..)
     , Sub (..)
     , Program (..)
+    , TCmd (..)
+    , SocketMood (..)
     )
 import Architecture.Internal.Sub (updateSubscriptions)
 
@@ -56,19 +59,59 @@ loop self cfg = do
         Just thing -> do
             putStrLn "Loop has thing"
             newself <- case thing of
-                -- here in updateWriters, if handleCmd is called we try to putTMVar
-                -- and if the TMVar is full there is nothing to take the TMVar from anyway.
-                --
-                -- maybe better to getSocket in a thread, have the socket map be TVar'd
-                (Left tcmd) -> trace "t mainloop updateWriters" $ updateWriters tcmd self cfg
-                (Right sub) -> trace "t mainloop updateSubscriptions" $ updateSubscriptions sub cfg self
+                (Left (SocketResult key Nothing)) ->
+                    return $ self { sockets = Map.delete key (sockets self) }
+                (Left (SocketResult key (Just s))) ->
+                    case (Map.lookup key (sockets self)) of
+                        Nothing -> close s >> return self
 
-            -- I guess since we get:
-            --     Mainline: thread blocked indefinitely in an STM transaction
-            -- before "looping" is printed, this means the failure is between
-            -- "Loop has thing" and here.
-            --
-            -- - trace every atomically block?
+                        Just (HaveSocket _) ->
+                            error "Newly opened socket collision"
+
+                        Just (WantWrites (x:xs)) -> do
+                            let self2 = putsocketm key (HaveSocket s)
+
+                            self3 <- updateWriters x self2 cfg
+
+                            runCmds self3 (cfg
+                                { init = (\(tm, _) -> (tm, Cmd xs)) (init cfg) })
+
+                            return self3
+
+                        Just (WantWrites []) ->
+                            error "No writes queued for new socket"
+
+                        Just (WantReads _ _) -> do
+                            model <- readTVarIO $ fst $ init cfg
+
+                            updateSubscriptions
+                                ((subscriptions cfg) model)
+                                cfg
+                                (putsocketm key (HaveSocket s))
+
+                        Just (WantBoth ((x:xs), _)) -> do
+                            -- TODO: this is just a copy paste of the previous
+                            -- two conditions, do not repeat yourself
+                            model <- readTVarIO $ fst $ init cfg
+
+                            let self2 = putsocketm key (HaveSocket s)
+                            self3 <- updateWriters x self2 cfg
+                            runCmds self3 (cfg
+                                { init = (\(tm, _) -> (tm, Cmd xs)) (init cfg) })
+
+                            updateSubscriptions
+                                ((subscriptions cfg) model)
+                                cfg
+                                self3
+
+                        Just (WantBoth ([], _)) ->
+                            error "No writes queued for new socket"
+
+                (Left tcmd) -> trace "t mainloop updateWriters" $
+                    updateWriters tcmd self cfg
+                (Right sub) -> trace "t mainloop updateSubscriptions" $
+                    updateSubscriptions sub cfg self
+
             putStrLn "looping"
 
             loop newself cfg
@@ -77,6 +120,8 @@ loop self cfg = do
         lexpr = trace "t mainloop - read TQueue" $ readTQueue (cmdSink self) >>= return . Left
         rexpr = trace "t mainloop - read TMVar" $ takeTMVar (subSink self) >>= return . Right
         getThing = (lexpr `orElse` rexpr) >>= return . Just
+        putsocketm key s = self
+            { sockets = Map.insert key s (sockets self) }
 
 
 run2 :: InternalState msg schemas -> Program model msg schemas -> IO ()
