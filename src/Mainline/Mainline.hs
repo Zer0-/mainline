@@ -73,12 +73,12 @@ servePort :: Port
 servePort = 51416
 
 seedNodePort :: Port
---seedNodePort = 6881
-seedNodePort = 51413
+seedNodePort = 6881
+--seedNodePort = 51413
 
 seedNodeHost :: Word32
---seedNodeHost = fromOctets [ 82, 221, 103, 244 ]
-seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
+seedNodeHost = fromOctets [ 82, 221, 103, 244 ]
+--seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
 --seedNodeHost = fromOctets [ 67, 215, 246, 10 ]
 
 seedNodeInfo :: CompactInfo

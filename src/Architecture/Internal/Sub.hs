@@ -9,7 +9,6 @@ module Architecture.Internal.Sub
     ) where
 
 import Prelude hiding (init)
-import Control.Exception.Safe (catchIO)
 import Control.Monad (foldM, forever)
 import Data.Foldable (sequence_)
 import qualified Data.Map as Map
@@ -49,8 +48,6 @@ import Architecture.Internal.Network
     , addrToCi
     , openSocket
     )
-
--- import Debug.Trace (trace)
 
 --MAXLINE = 65507 -- Max size of a UDP datagram
 --(limited by 16 bit length part of the header field)
@@ -275,10 +272,8 @@ runTCPClientSub cfg istate key sock tfns failmsg = do
     putStrLn $ "runTCPClientSub " ++ show key
     (getMore, th) <- readTVarIO tfns
     putStrLn "runTCPClientSub reading socket"
-    mbytes <- catchIO
-        ((more sock getMore BS.empty) >>= return . Just)
-        (const $ return Nothing)
-    putStrLn "runTCPClientSub read socket"
+    mbytes <- more sock getMore BS.empty
+    putStrLn "runTCPClientSub read socket complete"
 
     case mbytes of
         Nothing -> do
@@ -311,10 +306,11 @@ runTCPClientSub cfg istate key sock tfns failmsg = do
 
         more s f msg =
             let n = f msg in
-            if n < 1 then return msg
+            if n < 1 then return (Just msg)
             else do
-                bs <- recv s n
-                more s f (msg <> bs)
+                bs <- recv s (min 4096 n)
+                if BS.length bs == 0 then return Nothing
+                else more s f (msg <> bs)
 
 
 runUDPSub

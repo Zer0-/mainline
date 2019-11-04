@@ -271,8 +271,7 @@ subscriptions t ci _ =
         numToRead :: ByteString -> Int
         numToRead bs
             | BS.length bs < 4 = trace "t read 4 bytes" 4
-            | otherwise = traceShowId $
-                (expectedLen (BS.take 4 bs)) - (BS.length bs) + 4
+            | otherwise = let n = (expectedLen (BS.take 4 bs)) - (BS.length bs) + 4 in trace ("t read " ++ show n ++ "bytes") n
 
         expectedLen :: ByteString -> Int
         expectedLen b = fromIntegral ((fromByteString b) :: Word32)

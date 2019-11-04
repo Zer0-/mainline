@@ -47,10 +47,10 @@ import Debug.Trace (trace)
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 1
+nMplex = 10
 
 callPerSecondPerCi :: Int
-callPerSecondPerCi = 5
+callPerSecondPerCi = 2
 
 scoreAggregateSeconds :: Int
 scoreAggregateSeconds = 60
@@ -185,7 +185,7 @@ update
                 Nothing ->
                     case Map.lookup infohash (metadls mm) of
                         Just _ -> (cached, Cmd.none)
-                        Nothing -> (cached, checkdb)
+                        Nothing -> (cached, Cmd.batch [logmsg, checkdb])
 
         cached = haves mm
 
@@ -193,6 +193,8 @@ update
             Cmd.db
                 (SQL.queryExists (octToByteString infohash))
                 (Just $ DBHasInfo now infohash idx)
+
+        logmsg = Cmd.log Cmd.DEBUG [ "query if db has", show infohash ]
 
         insertScore score =
             Cmd.db
@@ -535,10 +537,10 @@ sendOrQueue result key msg idx m =
         (Right cache) -> updateExplicit msg m { tcache = cache } idx
 
 calculateScore :: Int -> POSIXTime -> Double
-calculateScore n t = (euler ** ((log maxDbl / endt) * x) - 1) * (fromIntegral n)
+calculateScore n t = (euler ** ((log maxDbl / endt) * (x - t0)) - 1) * (fromIntegral n)
     where
         maxDbl = 10 ** 300
-        t0 = 1571335545
+        t0 = 1572391617
         endt = t0 + (1.577 * 10**10)
         x = realToFrac t
         euler = exp 1
