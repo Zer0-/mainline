@@ -23,8 +23,9 @@ import qualified Data.List as L
 import Data.ByteString (ByteString, empty)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map             as Map
+import Data.Map                       (Map)
 import qualified Data.Set             as Set
-import Data.Set                      (fromAscList, filter)
+import Data.Set                      (fromAscList, filter, Set)
 import Data.Word                     (Word32)
 import Data.BEncode                  (encode, decode)
 import Data.Time.Clock.POSIX         (POSIXTime)
@@ -124,13 +125,14 @@ data Msg
         }
     | TimeoutTransactions POSIXTime
     | MaintainPeers POSIXTime
-    | PeersFoundResult NodeID InfoHash [CompactInfo]
+    | PeersFoundResult Int NodeID InfoHash [CompactInfo]
     | UDPError
 
 data ServerState = ServerState
     { transactions :: Transactions
     , conf         :: ServerConfig
     , routingTable :: RoutingTable
+    , gettingPeers :: Map InfoHash (Set NodeID)
     }
 
 data ServerConfig = ServerConfig
@@ -146,11 +148,12 @@ data TransactionState = TransactionState
     ,  recipient :: NodeInfo
     }
 
-type Transactions = Map.Map NodeID (Map.Map ByteString TransactionState)
+type Transactions = Map NodeID (Map ByteString TransactionState)
 
 data Action
     = Warmup
     | KeepAlive
+    | NewPeersSearch InfoHash
     | GettingPeers InfoHash
     deriving Eq
 
@@ -240,11 +243,12 @@ update
         , newtid
         , when
         }
-    (Ready (ServerState { transactions, conf, routingTable })) =
+    (Ready (ServerState { transactions, conf, routingTable, gettingPeers })) =
         ( Ready ServerState
             { transactions = trsns
             , conf
             , routingTable
+            , gettingPeers
             }
         , Cmd.batch [ logmsg, sendCmd ]
         )
@@ -285,12 +289,13 @@ update
         client
         (KPacket { message = Response nodeid Pong })
     )
-    (Uninitialized1 conf _) = (model, warmup)
+    (Uninitialized1 conf _) = (model, Cmd.batch [logmsg, warmup])
         where
             model = Ready ServerState
                 { transactions = Map.empty
-                , conf = conf
+                , conf         = conf
                 , routingTable = initRoutingTable ourid
+                , gettingPeers = Map.empty
                 }
 
             warmup = Cmd.randomBytes
@@ -304,6 +309,8 @@ update
                     , when       = now
                     }
                 )
+
+            logmsg = Cmd.log Cmd.DEBUG ["Initial Pong from", show client]
 
             ourid = ourId conf
 
@@ -333,7 +340,13 @@ update (SendResponse { targetNode, body, tid }) (Ready s) =
 -- Receive a message
 update
     (Inbound now client (KPacket { transactionId, message, version }))
-    (Ready ServerState { transactions, conf, routingTable = rt }) =
+    (Ready
+        ServerState
+            { transactions
+            , conf
+            , routingTable = rt
+            , gettingPeers
+            }) =
         ( Ready state3
         , Cmd.batch
             [ Cmd.log
@@ -373,6 +386,7 @@ update
                 { transactions
                 , conf
                 , routingTable = rt
+                , gettingPeers
                 }
 
             withoutTransaction = \nid -> ServerState
@@ -389,6 +403,7 @@ update
                     )
                 , conf
                 , routingTable = rt
+                , gettingPeers
                 }
 
             (state2, cmd) = case message of
@@ -458,8 +473,8 @@ update (TimeoutTransactions now) (Ready state) =
         f t ts = Map.update (g ts) (myfst $ head ts) t
 
         g :: [(NodeID, ByteString, a)]
-          -> Map.Map ByteString TransactionState
-          -> Maybe (Map.Map ByteString TransactionState)
+          -> Map ByteString TransactionState
+          -> Maybe (Map ByteString TransactionState)
         g ts m
             | length ts == Map.size m = Nothing
             | otherwise = Just $ Map.withoutKeys m (Set.fromList (map mysnd ts))
@@ -526,7 +541,7 @@ update (SendMessage {}) Uninitialized = undefined
 update (SendMessage {}) (Uninitialized1 _ _) = undefined
 update (SendResponse {}) Uninitialized = undefined
 update (SendResponse {}) (Uninitialized1 _ _) = undefined
-update (PeersFoundResult _ _ _) _ = undefined
+update (PeersFoundResult _ _ _ _) _ = undefined
 update UDPError _ = undefined
 
 {-
@@ -700,22 +715,59 @@ handleResponse
                     (filter filterNodes (fromAscList ninfos))
 
 
+-- Respond first GetPeers Nodes Response
+handleResponse
+    respondingNode
+    (TransactionState _ (NewPeersSearch infohash) _)
+    now
+    response
+    state =
+        handleResponse
+            respondingNode
+            (TransactionState undefined (GettingPeers infohash) undefined)
+            now
+            response
+            state { gettingPeers = newGettingPeers }
+
+        where
+            ongoing = gettingPeers state
+
+            newGettingPeers =
+                if Map.member infohash ongoing then ongoing
+                else Map.insert infohash (Set.empty) (gettingPeers state)
+
 -- Respond to GetPeers Nodes Response when looking for peers
 handleResponse
     respondingNode
     (TransactionState _ (GettingPeers infohash) _)
     now
     (NodesFound _ nodes)
-    state = (state, Cmd.batch $ map mksend closer)
+    state
+        | Map.member infohash ongoing =
+            ( state { gettingPeers = newOngoing }
+            , Cmd.batch $ map mksend closer
+            )
+        | otherwise = (state, Cmd.none)
         where
             closer = L.filter
                 ( \n ->
                     ( (== GT)
                     . (orderingf infohash (nodeId respondingNode))
                     . nodeId
-                    ) n && filterNodes n
+                    ) n
+                    && filterNodes n
+                    && Set.notMember (nodeId n) contacted
                 )
                 nodes
+
+            ongoing = gettingPeers state
+
+            newOngoing = Map.insert infohash newContacted ongoing
+
+            contacted = ongoing Map.! infohash
+
+            newContacted =
+                contacted `Set.union` Set.fromList (map nodeId closer)
 
             mksend node = Cmd.randomBytes tidsize
                 (\newid -> SendMessage
@@ -730,20 +782,21 @@ handleResponse
 
             config = conf state
 
-        -- for every node in nodes that is closer to infohash than respondingNode
-        -- make a SendMessage command to query them with GetPeers.
-        -- also consider that node for addition? (extra)
-
-
 handleResponse
     _
     (TransactionState _ (GettingPeers infohash) _)
     _
     (PeersFound _ peers)
-    state = (state, Cmd.bounce (PeersFoundResult ourid infohash peers))
+    state
+        | Map.member infohash (gettingPeers state) =
+            (state, Cmd.bounce (PeersFoundResult idx ourid infohash peers))
+        | otherwise = (state, Cmd.none)
 
         where
-            ourid = ourId $ conf $ state
+            cf = conf state
+            ourid = ourId $ cf
+            idx = index cf
+
 
 -- Ignore the rest for now
 handleResponse

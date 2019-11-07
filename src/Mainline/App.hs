@@ -50,7 +50,7 @@ nMplex :: Int
 nMplex = 10
 
 callPerSecondPerCi :: Int
-callPerSecondPerCi = 2
+callPerSecondPerCi = 1
 
 scoreAggregateSeconds :: Int
 scoreAggregateSeconds = 60
@@ -60,7 +60,7 @@ data Model = Model
     , tcache  :: LRU Int POSIXTime
     , haves   :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
     , queue   :: [(Int, Int, M.Msg)] -- WARN: unbounded
-    , metadls :: Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model) -- TODO: Time these out?
+    , metadls :: Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model, Int) -- TODO: Time these out?
     }
 
 data MMsg
@@ -108,7 +108,7 @@ subscriptions mm
             rsubs = map (\(ih, (ci, mdl)) -> R.subscriptions ih ci mdl) rmodels
 
             rmodels = Map.assocs (metadls mm)
-                >>= \(ih, (_, m)) -> zip (repeat ih) (Map.assocs m)
+                >>= \(ih, (_, m, _)) -> zip (repeat ih) (Map.assocs m)
 
 
 update :: MMsg -> Model -> (Model, Cmd MMsg)
@@ -203,7 +203,7 @@ update
 
 
 update (DBHasInfo t infohash _ True) model =
-    (model { haves = newHaves }, Cmd.none)
+    (model { haves = newHaves }, logmsg)
     where
         cached = haves model
         (_, mHaveInfo) = lookup infohash cached
@@ -211,15 +211,17 @@ update (DBHasInfo t infohash _ True) model =
             Just (created, n) -> insert infohash (created, n + 1) cached
             Nothing -> insert infohash (t, 1) cached
 
+        logmsg = Cmd.log Cmd.DEBUG [ "DB already has", show infohash ]
+
 
 update (DBHasInfo t infohash ix False) model
-    | isReady mm =
+    | isReady mm && not (null closest) =
         ( model
         , Cmd.randomBytes M.tidsize
             (\newid -> MMsg $ SendMessage
                 { idx        = ix
-                , sendAction = M.GettingPeers infohash
-                , targetNode = target
+                , sendAction = M.NewPeersSearch infohash
+                , targetNode = head closest
                 , body       = Query ourid (GetPeers infohash)
                 , newtid     = newid
                 , when       = t
@@ -229,7 +231,7 @@ update (DBHasInfo t infohash ix False) model
     | otherwise = (model, Cmd.none)
 
         where
-            target = head $ nclosest infohash 1 (M.routingTable state)
+            closest = nclosest infohash 1 (M.routingTable state)
 
             ourid = M.ourId $ M.conf state
 
@@ -291,7 +293,7 @@ update
 update (MMsg (SendResponse { idx, targetNode, body, tid })) m =
     updateExplicit (SendResponse idx targetNode body tid) m idx
 
-update (ProcessQueue now) m = foldl' f (m { queue = [] }, Cmd.none) (queue m)
+update (ProcessQueue now) m = foldl' f (m { queue = [] }, dbg) (trace ("t Processing queue of length " ++ (show $ length (queue m))) (queue m))
     where
         f (model, cmds) (i, key, msg) =
             let
@@ -303,19 +305,21 @@ update (ProcessQueue now) m = foldl' f (m { queue = [] }, Cmd.none) (queue m)
                     model
             in (model2, Cmd.batch [cmds, cmds2])
 
+        dbg = Cmd.log Cmd.DEBUG [ "ProcessQueue" ]
+
 update (MMsg (TimeoutTransactions now)) m =
     propagateTimer (TimeoutTransactions now) m
 
 update (MMsg (MaintainPeers now)) m =
     propagateTimer (MaintainPeers now) m
 
-update (MMsg (PeersFoundResult nodeid infohash peers)) model
+update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
     | Map.member infohash dls =
         ( model { metadls = Map.insert infohash newMdls dls }
         , Cmd.up RMsg (Cmd.batch newcmds)
         )
     | otherwise =
-        ( model { metadls = Map.insert infohash (R.Off, initialMdls) dls }
+        ( model { metadls = Map.insert infohash (R.Off, initialMdls, idx) dls }
         , Cmd.up RMsg (Cmd.batch cmds)
         )
 
@@ -340,10 +344,14 @@ update (MMsg (PeersFoundResult nodeid infohash peers)) model
         existingInfo = dls Map.! infohash
 
         existingMdls :: Map.Map CompactInfo R.Model
-        existingMdls = snd existingInfo
+        existingMdls = (\(_, x, _) -> x) existingInfo
 
-        newMdls :: (R.Model, Map.Map CompactInfo R.Model)
-        newMdls = (fst existingInfo, existingMdls `Map.union` initialMdls)
+        newMdls :: (R.Model, Map.Map CompactInfo R.Model, Int)
+        newMdls =
+            ( (\(x, _, _) -> x) existingInfo
+            , existingMdls `Map.union` initialMdls
+            , idx
+            )
 
         newcmds :: [Cmd R.Msg]
         newcmds = map (snd . snd) $
@@ -355,6 +363,7 @@ update (RMsg (R.Have now infohash infodict)) model =
     ( model
         { metadls = Map.delete infohash (metadls model)
         , haves = insert infohash (now, 1) (haves model)
+        , models = newmdls
         }
     , insertdb
     )
@@ -391,6 +400,18 @@ update (RMsg (R.Have now infohash infodict)) model =
             , fromIntegral $ fiLength
             )
 
+        -- remove gettingPeers entry from particular model
+        dlinfo = Map.lookup infohash (metadls model)
+
+        newmdls = case dlinfo of
+            Just (_, _, idx) ->
+                ms // [(idx, removeGettingPeers (ms ! idx) infohash)]
+
+            Nothing -> ms
+
+        ms = models model
+
+
 update (RMsg (R.TCPError infohash ci)) model =
     ( model { metadls = newdls }
     , Cmd.log Cmd.DEBUG [ "Download of ", show infohash
@@ -399,16 +420,15 @@ update (RMsg (R.TCPError infohash ci)) model =
     where
         newdls =
             Map.update
-                ( \(a, dls) ->
+                ( \(a, dls, idx) ->
                     let dls2 = Map.delete ci dls in
                     if Map.null dls2 then Nothing
-                    else Just (a, dls2)
+                    else Just (a, dls2, idx)
                 )
                 infohash
                 (metadls model)
 
 update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
-
     where
         (infohash, ci) = details m
 
@@ -417,7 +437,7 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
         mdl = Map.lookup infohash dls
 
         (newdls, cmds) = case mdl of
-            Just (sharedmodel, rmodelm) ->
+            Just (sharedmodel, rmodelm, idx) ->
                 let
                     rmodel2m = Map.lookup ci rmodelm
 
@@ -440,11 +460,13 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
 
                     newdls1 = case Map.null newmodelm of
                         True -> Map.delete infohash dls
-                        False ->
-                            Map.insert infohash (newSharedMdl, newmodelm) dls
+                        False -> Map.insert
+                            infohash
+                            (newSharedMdl, newmodelm, idx)
+                            dls
 
                 in
-                    (newdls1, cmds1) :: (Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model), Cmd R.Msg)
+                    (newdls1, cmds1)
 
             -- something else has deleted our entry
             Nothing -> (dls, Cmd.none)
@@ -555,6 +577,15 @@ sendOrQueue result key msg idx m =
             )
 
         (Right cache) -> updateExplicit msg m { tcache = cache } idx
+
+
+removeGettingPeers :: M.Model -> InfoHash -> M.Model
+removeGettingPeers (M.Ready state) infohash =
+    M.Ready $ state { M.gettingPeers = newGettingPeers }
+    where
+        newGettingPeers = Map.delete infohash (M.gettingPeers state)
+removeGettingPeers _ _ = undefined
+
 
 calculateScore :: Int -> POSIXTime -> Double
 calculateScore n t = (euler ** ((log maxDbl / endt) * (x - t0)) - 1) * (fromIntegral n)
