@@ -606,9 +606,9 @@ throttle
 throttle cache key now cps =
     case lookup key cache of
         (_, Nothing) -> Right cache2
-        (_, Just time) ->
+        (lru, Just time) ->
             if now - time < (fromInteger 1) / (fromIntegral cps)
-            then Left cache2
+            then Left lru
             else Right cache2
     where
         cache2 = insert key now cache
