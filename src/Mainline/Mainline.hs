@@ -63,8 +63,6 @@ import Network.KRPC.Types
     )
 import Mainline.SQL (Schemas);
 
-import Debug.Trace (trace)
-
 type Cmd msg = Cmd.Cmd msg Schemas
 
 {- Constants -}
@@ -242,7 +240,7 @@ update
         , newtid
         , when
         }
-    (Ready (ServerState { transactions, conf, routingTable })) = trace "t Have random bytes for sending message" $
+    (Ready (ServerState { transactions, conf, routingTable })) =
         ( Ready ServerState
             { transactions = trsns
             , conf
@@ -287,7 +285,7 @@ update
         client
         (KPacket { message = Response nodeid Pong })
     )
-    (Uninitialized1 conf _) = trace "t Mainline - replying to pong" $ (model, warmup)
+    (Uninitialized1 conf _) = (model, warmup)
         where
             model = Ready ServerState
                 { transactions = Map.empty
@@ -764,7 +762,7 @@ handleResponse
 logHelper :: NodeInfo -> Message -> String -> a -> (a, Cmd Msg)
 logHelper sender msg logstr state  = (state, log)
             where
-                log = Cmd.log Cmd.INFO
+                log = Cmd.log Cmd.DEBUG
                     [ logstr
                     , show sender
                     , show msg
@@ -858,8 +856,8 @@ considerNode now state node
 parseReceivedBytes :: CompactInfo -> Received -> Msg
 parseReceivedBytes compactinfo (Received { bytes, time }) =
     case decode bytes of
-        Right kpacket -> trace "t parseReceivedBytes - have Inbound" $ Inbound time compactinfo kpacket
-        Left msg -> trace "t parseReceivedBytes have ErrorParsing" $ ErrorParsing compactinfo bytes msg
+        Right kpacket -> Inbound time compactinfo kpacket
+        Left msg -> ErrorParsing compactinfo bytes msg
 
 
 getMTstate :: NodeID -> Transactions -> ByteString -> Maybe TransactionState

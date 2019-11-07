@@ -33,8 +33,6 @@ import qualified Architecture.Sub as Sub
 import qualified Architecture.Cmd as Cmd
 import Mainline.Mainline (Cmd)
 
-import Debug.Trace (trace, traceShowId)
-
 metadataBlocksize :: Int
 metadataBlocksize = 16384
 
@@ -245,7 +243,7 @@ update _ Off = (Off, Cmd.none)
 
 subscriptions :: InfoHash -> CompactInfo -> Model -> Sub Msg
 subscriptions _ _ Off = Sub.none
-subscriptions t ci Handshake = trace "t sub: read constant" $
+subscriptions t ci Handshake =
     Sub.readTCP
         t
         ci
@@ -263,23 +261,19 @@ subscriptions t ci Handshake = trace "t sub: read constant" $
             + 20 -- NodeID
             - BS.length bs
 
-subscriptions t ci _ =
-    trace "t sub: read variable number" $
-        Sub.readTCP t ci numToRead mkMsg (TCPError t ci)
+subscriptions t ci _ = Sub.readTCP t ci numToRead mkMsg (TCPError t ci)
 
     where
         numToRead :: ByteString -> Int
         numToRead bs
-            | BS.length bs < 4 = trace "t read 4 bytes" 4
-            | otherwise = let n = (expectedLen (BS.take 4 bs)) - (BS.length bs) + 4 in trace ("t read " ++ show n ++ "bytes") n
+            | BS.length bs < 4 = 4
+            | otherwise = (expectedLen (BS.take 4 bs)) - (BS.length bs) + 4
 
         expectedLen :: ByteString -> Int
         expectedLen b = fromIntegral ((fromByteString b) :: Word32)
 
         mkMsg :: Received -> Msg
-        mkMsg Received { bytes, time } =
-            trace ("t Have Got message from " ++ show ci) $
-                Got time 0 t ci (decode bytes)
+        mkMsg Received { bytes, time } = Got time 0 t ci (decode bytes)
 
 
 numBlks :: Int -> Int

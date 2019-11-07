@@ -61,8 +61,6 @@ data Model = Model
     , haves   :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
     , queue   :: [(Int, Int, M.Msg)] -- WARN: unbounded
     , metadls :: Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model) -- TODO: Time these out?
-    -- Also if we have too many downloads early but we want to keep the number of nodes high
-    -- can add a database queue for metadata dls
     }
 
 data MMsg
@@ -91,8 +89,7 @@ subscriptions :: Model -> Sub MMsg
 subscriptions mm
     | indices mainms == [] = trace "this should never happen" Sub.none
     | isUn (mainms ! 0) = trace "nothing to sub" Sub.none
-    | otherwise = trace ("t rsubs size: " ++ (show $ length rsubs)) $
-        Sub.batch $
+    | otherwise = Sub.batch $
         (Sub.up RMsg $ Sub.batch rsubs) :
         [ Sub.udp M.servePort (\ci r -> MMsg $ M.parseReceivedBytes ci r)
         , Sub.timer 500 ProcessQueue
@@ -135,7 +132,7 @@ update
         mm
     | otherwise = updateExplicit msg mm (fst $ head havet)
         where
-            m = trace "t App - Inbound Response" $ models mm
+            m = models mm
             msg = Inbound t ci (KPacket transactionId (Response nodeid r) v)
 
             havet = filter (fil . snd) (assocs m)
@@ -169,7 +166,7 @@ update
     mm = (model { haves = newHaves }, Cmd.batch [ cmds, cmds2 ])
 
     where
-        msg = trace "t App - process inbound AnnouncePeer" $ Inbound now ci (KPacket transactionId (Query nodeid q) v)
+        msg = Inbound now ci (KPacket transactionId (Query nodeid q) v)
         q = AnnouncePeer impliedPort infohash port token mname
         idx = queryToIndex (Query nodeid q) mm
         (model, cmds) = updateExplicit msg mm idx
@@ -352,7 +349,7 @@ update (MMsg (PeersFoundResult nodeid infohash peers)) model
         newcmds = map (snd . snd) $
             filter (((flip Map.notMember) existingMdls) . fst) rinfo
 
-update (MMsg UDPError) _ = undefined
+update (MMsg UDPError) model = (model, Cmd.log Cmd.WARNING ["UDPError"])
 
 update (RMsg (R.Have now infohash infodict)) model =
     ( model
@@ -417,35 +414,58 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
 
         dls = metadls model
 
-        newdls = case Map.null newmodelm of
-            True -> Map.delete infohash dls
-            False -> Map.insert infohash (newSharedMdl, newmodelm) dls
+        mdl = Map.lookup infohash dls
 
-        (sharedmodel, rmodelm) = dls Map.! infohash
+        (newdls, cmds) = case mdl of
+            Just (sharedmodel, rmodelm) ->
+                let
+                    rmodel2m = Map.lookup ci rmodelm
 
-        rmodel2 = rmodelm Map.! ci
+                    (newmodel, cmds1) = case rmodel2m of
+                        Just rmodel2 -> updateRModel sharedmodel rmodel2
+                        Nothing ->
+                            ( R.Off
+                            , Cmd.log Cmd.WARNING
+                                [ "CompactInfo for RMsg not in our state."
+                                , "This shouldn't happen." ]
+                            )
 
-        (newmodel, cmds) = case (sharedmodel, rmodel2, m) of
-            (R.Downloading {}, R.Downloading {}, _) ->
-                R.update m (mergeDls sharedmodel rmodel2)
-            (R.Downloading mdataSize _ lastBlk blks, _, (R.Got now _ _ _ msg)) ->
-                case R.chooseNextBlk mdataSize lastBlk blks of
-                    Nothing ->
-                        ( R.Off
-                        , Cmd.log Cmd.DEBUG
-                            [ "Not starting seemingly finished download" ]
-                        )
-                    Just nextBlk ->
-                        R.update (R.Got now nextBlk infohash ci msg) rmodel2
-            _ -> R.update m rmodel2
+                    newmodelm = case newmodel of
+                        R.Off -> Map.delete ci rmodelm
+                        _ -> Map.insert ci newmodel rmodelm
 
-        newmodelm = case newmodel of
-            R.Off -> Map.delete ci rmodelm
-            _ -> Map.insert ci newmodel rmodelm
+                    newSharedMdl = case newmodel of
+                        R.Downloading {} -> newmodel
+                        _ -> sharedmodel
 
-        newSharedMdl = case newmodel of
-            R.Downloading {} -> newmodel
-            _ -> sharedmodel
+                    newdls1 = case Map.null newmodelm of
+                        True -> Map.delete infohash dls
+                        False ->
+                            Map.insert infohash (newSharedMdl, newmodelm) dls
+
+                in
+                    (newdls1, cmds1) :: (Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model), Cmd R.Msg)
+
+            -- something else has deleted our entry
+            Nothing -> (dls, Cmd.none)
+
+
+        updateRModel :: R.Model -> R.Model -> (R.Model, Cmd R.Msg)
+        updateRModel sharedmodel rmodel =
+            case (sharedmodel, rmodel, m) of
+                (R.Downloading {}, R.Downloading {}, _) ->
+                    R.update m (mergeDls sharedmodel rmodel)
+                (R.Downloading mdataSize _ lastBlk blks, _, (R.Got now _ _ _ msg)) ->
+                    case R.chooseNextBlk mdataSize lastBlk blks of
+                        Nothing ->
+                            ( R.Off
+                            , Cmd.log Cmd.DEBUG
+                                [ "Not starting seemingly finished download" ]
+                            )
+                        Just nextBlk ->
+                            R.update (R.Got now nextBlk infohash ci msg) rmodel
+                _ -> R.update m rmodel
+
 
         details :: R.Msg -> (InfoHash, CompactInfo)
         details (R.DownloadInfo _ i c) = (i, c)
@@ -500,7 +520,7 @@ queryToIndex _ _ = undefined
 
 
 updateExplicit :: M.Msg -> Model -> Int -> (Model, Cmd MMsg)
-updateExplicit msg model ix = trace ("t App.updateExplicit model " ++ show ix) $
+updateExplicit msg model ix =
     ( model { models = m // [(ix, mm)] }
     , Cmd.up MMsg cmds
     )
@@ -557,8 +577,8 @@ throttle cache key now cps =
         (_, Nothing) -> Right cache2
         (_, Just time) ->
             if now - time < (fromInteger 1) / (fromIntegral cps)
-            then trace "t throttle says queue it" $ Left cache2
-            else trace "t hrottle says go" $ Right cache2
+            then Left cache2
+            else Right cache2
     where
         cache2 = insert key now cache
 

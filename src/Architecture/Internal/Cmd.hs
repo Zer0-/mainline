@@ -64,8 +64,6 @@ import Architecture.Internal.Types
     , SocketMood (..)
     )
 
-import Debug.Trace (trace)
-
 execTCmd
     :: TVar (Map Int (CmdQ, a, ThreadId))  -- writeThreadS
     -> TQueue (TCmd msg schemas)           -- cmdSink
@@ -121,7 +119,6 @@ execTCmd _ _ Nothing (CmdDatabase _ _) = undefined
 execTCmd _ _ _ (CmdBounce m) = return (Just m)
 
 execTCmd wrT sink _ (CmdSendTCP t ci bs msg) = do
-    putStrLn $ "execTCmd CmdSendTCP to " ++ show ci
     atomically $ sinkTCmd wrT sink (CmdSendTCP t ci bs msg) >> return Nothing
 
 execTCmd wrT sink _ cmd = atomically $ sinkTCmd wrT sink cmd >> return Nothing
@@ -267,15 +264,12 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
             case msock of
                 Nothing -> return istate2
                 Just (sock) -> do
-                    putStrLn "have just msock (new writer socket)"
 
                     (newq, tquit) <- atomically $ do
                         tquit <- newTVar quit
                         newq <- getq
 
                         return (newq, tquit)
-
-                    putStrLn "forking new writer thread"
 
                     threadId <- forkIO
                                     ( threadmain
@@ -289,8 +283,6 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
                     atomically $ modifyTVar
                         (writeThreadS istate2)
                         (Map.insert key (initCmdQ newq, tquit, threadId))
-
-                    putStrLn "updateWriters returning"
 
                     return istate2
 
@@ -315,7 +307,7 @@ writeUDPMain
     -> IO ()
 writeUDPMain q quit key qsink sock = runMain q quit key qsink sock send
     where
-        send (ci, bs) = trace ("t sending udp " ++ show key) $ sendTo sock bs (ciToAddr ci) >> return ()
+        send (ci, bs) = sendTo sock bs (ciToAddr ci) >> return ()
 
 
 writeTCPMain
@@ -327,7 +319,7 @@ writeTCPMain
     -> IO ()
 writeTCPMain q quit key qsink sock = runMain q quit key qsink sock send
     where
-        send = trace ("t sending tcp " ++ show key) $ sendAll sock
+        send = sendAll sock
 
 
 runMain
@@ -339,16 +331,13 @@ runMain
     -> (a -> IO ())
     -> IO ()
 runMain q quit key qsink sock fsend = do
-    putStrLn $ show key ++ " runMain - top"
     msend <- atomically $ lexpr `orElse` rexpr
 
     case msend of
         Just x -> do
-            putStrLn $ show key ++ " runMain - Sending on socket"
             fsend x
             runMain q quit key qsink sock fsend
         Nothing -> do
-            putStrLn $ show key ++ " runMain - Quit condition reached, writing qsink"
             atomically $ writeTQueue qsink (QuitW key)
             return ()
 
@@ -366,8 +355,8 @@ sinkTCmd writeS sink cmd = do
     wrT <- readTVar writeS
 
     case Map.lookup (getKey cmd) wrT of
-        (Just (cmdq, _, _)) -> trace "t sinkTCmd - have a appropriate write thread, passing cmd." $ enqueueCmd cmdq cmd
-        Nothing -> trace "t sinkTCmd do not have write thread for this cmd, sinking to main thread" $ writeTQueue sink cmd
+        (Just (cmdq, _, _)) -> enqueueCmd cmdq cmd
+        Nothing -> writeTQueue sink cmd
 
 
 enqueueCmd :: CmdQ -> TCmd msg schemas -> STM ()
@@ -405,16 +394,11 @@ handleCmd
     -> Cmd msg schemas
     -> IO ()
 handleCmd cfg istate cmd = do
-    putStrLn "handleCmd - top, going runCmds"
     runCmds istate cfg { init = (tmodel, cmd) }
 
-    putStrLn "handleCmd - ran runCmds, writing new subscriptions"
-
     atomically $ do
-        model <- trace "t handleCmd reading tmodel tvar" $ readTVar tmodel
-        trace "t handleCmd wrote subs TMVar" $ putTMVar (subSink istate) ((subscriptions cfg) model)
-
-    putStrLn "handleCmd - done."
+        model <- readTVar tmodel
+        putTMVar (subSink istate) ((subscriptions cfg) model)
 
     where
         tmodel = fst (init cfg)

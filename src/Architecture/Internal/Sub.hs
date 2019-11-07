@@ -66,10 +66,6 @@ updateSubscriptions
     -> InternalState msg schemas
     -> IO (InternalState msg schemas)
 updateSubscriptions (Sub tsubs) cfg istate = do
-    putStrLn "updateSubscriptions"
-    putStrLn $ show (Map.size $ sockets istate) ++ "open sockets"
-    putStrLn $ show (Map.size $ readThreadS istate) ++ "read threads (before)"
-
     writeS <- atomically $ do
         updateHandlers currentReads tsubpairs
 
@@ -84,11 +80,8 @@ updateSubscriptions (Sub tsubs) cfg istate = do
 
         return ws
     
-    putStrLn $ "updateSubscriptions - number of new loads:" ++ show (length loads)
     (newsocks, loaded) <- foldM fsub (Map.empty, Map.empty) loads
-    putStrLn $ "updateSubscriptions - loads loaded:" ++ show (Map.size loaded)
 
-    putStrLn $ "updateSubscriptions unloading (killing) " ++ (show $ Map.size unloads) ++ " subs"
     mapM_ killThread (Map.map snd unloads)
 
     let
@@ -111,8 +104,6 @@ updateSubscriptions (Sub tsubs) cfg istate = do
             , sockets =
                 newsocks `Map.union` ((sockets istate) `Map.withoutKeys` toClose)
             }
-
-    putStrLn $ show (Map.size $ readThreadS newstate) ++ "read threads (after)"
 
     return newstate
 
@@ -219,7 +210,6 @@ subscribe cfg istate key msocket (TCPClient t ci getMore h failmsg) =
     case msocket of
         Just (HaveSocket sock) -> do
             th <- atomically (newTVar (getMore, h))
-            putStrLn "subscribe - spawning new TCP read thread."
             threadId <- forkIO $ runTCPClientSub cfg istate key sock th failmsg
             return (Just $ HaveSocket sock, Just (TCPClientHandler th, threadId))
 
@@ -269,21 +259,15 @@ runTCPClientSub
     -> msg
     -> IO ()
 runTCPClientSub cfg istate key sock tfns failmsg = do
-    putStrLn $ "runTCPClientSub " ++ show key
     (getMore, th) <- readTVarIO tfns
-    putStrLn "runTCPClientSub reading socket"
     mbytes <- more sock getMore BS.empty
-    putStrLn "runTCPClientSub read socket complete"
 
     case mbytes of
         Nothing -> do
-            putStrLn $ "TCP recv failed"
             cmd <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
             handleCmd cfg istate cmd
         Just bytes -> do
-            putStrLn $ "TCP read OK, have bytes. " ++ show key
             now <- getPOSIXTime
-            putStrLn "TCP read OK, have time."
 
             cmd <- atomically $ do
                 model <- readTVar tmodel
@@ -296,9 +280,7 @@ runTCPClientSub cfg istate key sock tfns failmsg = do
 
                 return cmd
 
-            putStrLn "TCP read OK, we have a new command"
             handleCmd cfg istate cmd
-            putStrLn "TCP read OK, cmd applied, msgs folded, looping"
             runTCPClientSub cfg istate key sock tfns failmsg
 
     where
@@ -321,9 +303,7 @@ runUDPSub
     -> TVar (CompactInfo -> Received -> msg)
     -> IO ()
 runUDPSub cfg istate key sock tHandler = forever $ do
-    putStrLn "runUDPSub"
     (bs, sockAddr) <- recvFrom sock maxline
-    putStrLn "runUDPSub has udp bytes"
     now <- getPOSIXTime
 
     cmd <- atomically $ do
@@ -341,7 +321,6 @@ runUDPSub cfg istate key sock tHandler = forever $ do
 
         return cmd
 
-    putStrLn "runUDPSub handling cmd"
     handleCmd cfg istate cmd
 
     where

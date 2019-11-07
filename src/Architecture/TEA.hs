@@ -41,12 +41,8 @@ import Architecture.Internal.Types
     )
 import Architecture.Internal.Sub (updateSubscriptions)
 
-import Debug.Trace (trace)
-
 loop :: InternalState msg schemas -> Program model msg schemas -> IO ()
 loop self cfg = do
-    putStrLn "Loop"
-
     mthing <- atomically $ do
         writeS <- readTVar (writeThreadS self)
 
@@ -57,7 +53,6 @@ loop self cfg = do
     case mthing of
         Nothing -> maybe (return ()) destroyConnectionPool (dbPool self)
         Just thing -> do
-            putStrLn "Loop has thing"
             newself <- case thing of
                 (Left (SocketResult key Nothing)) ->
                     return $ self { sockets = Map.delete key (sockets self) }
@@ -107,18 +102,14 @@ loop self cfg = do
                         Just (WantBoth ([], _)) ->
                             error "No writes queued for new socket"
 
-                (Left tcmd) -> trace "t mainloop updateWriters" $
-                    updateWriters tcmd self cfg
-                (Right sub) -> trace "t mainloop updateSubscriptions" $
-                    updateSubscriptions sub cfg self
-
-            putStrLn "looping"
+                (Left tcmd) -> updateWriters tcmd self cfg
+                (Right sub) -> updateSubscriptions sub cfg self
 
             loop newself cfg
 
     where
-        lexpr = trace "t mainloop - read TQueue" $ readTQueue (cmdSink self) >>= return . Left
-        rexpr = trace "t mainloop - read TMVar" $ takeTMVar (subSink self) >>= return . Right
+        lexpr = readTQueue (cmdSink self) >>= return . Left
+        rexpr = takeTMVar (subSink self) >>= return . Right
         getThing = (lexpr `orElse` rexpr) >>= return . Just
         putsocketm key s = self
             { sockets = Map.insert key s (sockets self) }
