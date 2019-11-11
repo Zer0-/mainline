@@ -239,7 +239,13 @@ update (GotHandshake _ _ have) _ = (Off, logmsg)
             ]
 
 update _ Off = (Off, Cmd.none)
+update (DownloadInfo _ _ _) _ = (Off, Cmd.none)
+update (Got _ _ _ _ msg) _      = (Off, Cmd.log Cmd.INFO
+    [ "Received unexpected message having never shook hands:", show msg ])
 
+
+update (Have _ _ _) _  = (Off, Cmd.none)
+update (TCPError _ _) _  = (Off, Cmd.none) -- handled in App
 
 subscriptions :: InfoHash -> CompactInfo -> Model -> Sub Msg
 subscriptions _ _ Off = Sub.none
