@@ -72,12 +72,12 @@ servePort :: Port
 servePort = 51416
 
 seedNodePort :: Port
-seedNodePort = 6881
---seedNodePort = 51413
+seedNodePort = 51413
+--seedNodePort = 6881
 
 seedNodeHost :: Word32
-seedNodeHost = fromOctets [ 82, 221, 103, 244 ]
---seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
+seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
+--seedNodeHost = fromOctets [ 82, 221, 103, 244 ]
 --seedNodeHost = fromOctets [ 67, 215, 246, 10 ]
 
 seedNodeInfo :: CompactInfo
@@ -95,7 +95,7 @@ responseTimeout = 120
 {- Data Structures -}
 
 data Model
-    = Uninitialized
+    = Uninitialized Int
     | Uninitialized1 ServerConfig ByteString
     | Ready ServerState
 
@@ -108,6 +108,7 @@ data Msg
         , sendRecipient :: CompactInfo
         , body          :: Message
         , newtid        :: ByteString
+        , newNodeId     :: Integer
         }
     | SendMessage
         { idx           :: Int
@@ -166,7 +167,7 @@ config :: Config Model Msg
 config = Config init update subscriptions
 
 init :: (Model, Cmd Msg)
-init = (Uninitialized, Cmd.randomBytes 20 (NewNodeId 0))
+init = (Uninitialized 0, Cmd.randomBytes 20 NewNodeId)
 -}
 
 
@@ -174,22 +175,14 @@ update :: Msg -> Model -> (Model, Cmd Msg)
 -- Error Parsing
 update (ErrorParsing ci bs err) m =
     case m of
-        Uninitialized -> (m, logParsingErr ci bs err)
+        Uninitialized _ -> (m, logParsingErr ci bs err)
         (Uninitialized1 c _) -> (m, onParsingErr (listenPort c) ci bs err)
         Ready state -> (m, onParsingErr (listenPort $ conf state) ci bs err)
 
 -- Get new node id. Init server state, request tid for pinging seed node
-update (NewNodeId ix bs) Uninitialized = (initState, initialCmds)
+update (NewNodeId _ bs) (Uninitialized ix) = (Uninitialized ix, initialCmds)
     where
         initialCmds = Cmd.batch [ logmsg, pingSeed ]
-        initState = Uninitialized1 conf empty
-
-        conf = ServerConfig
-            { index = ix
-            , listenPort = servePort
-            , seedNode = seedNodeInfo
-            , ourId = ourid
-            }
 
         pingSeed = Cmd.randomBytes
             tidsize
@@ -198,6 +191,7 @@ update (NewNodeId ix bs) Uninitialized = (initState, initialCmds)
                 , sendRecipient = seedNodeInfo
                 , body          = (Query ourid Ping)
                 , newtid        = t
+                , newNodeId     = ourid
                 }
             )
 
@@ -211,16 +205,25 @@ update (NewNodeId ix bs) Uninitialized = (initState, initialCmds)
 
 update
     SendFirstMessage
-        { sendRecipient
+        { idx
+        , sendRecipient
         , body
         , newtid
+        , newNodeId
         }
-    (Uninitialized1 conf _) =
+    (Uninitialized _) =
         ( Uninitialized1 conf newtid
         , Cmd.batch [ logmsg, sendCmd ]
         )
 
         where
+            conf = ServerConfig
+                { index = idx
+                , listenPort = servePort
+                , seedNode = seedNodeInfo
+                , ourId = newNodeId
+                }
+
             logmsg = Cmd.log Cmd.DEBUG
                 [ "Sending initial", show kpacket , "to", show sendRecipient ]
 
@@ -310,7 +313,7 @@ update
                     }
                 )
 
-            logmsg = Cmd.log Cmd.DEBUG ["Initial Pong from", show client]
+            logmsg = Cmd.log Cmd.INFO ["Initial Pong from", show client]
 
             ourid = ourId conf
 
@@ -438,15 +441,28 @@ update
                         }
                 Nothing -> state2
 
+update (Inbound _ ci kpacket) (Uninitialized ix) =
+    ((Uninitialized ix), log)
+
+    where
+        log = Cmd.log Cmd.DEBUG
+            [ "Ignoring received message while Uninitialized"
+            , show ci
+            , show kpacket
+            ]
+
 update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
     ((Uninitialized1 conf tid), log)
 
     where
-        log = Cmd.log Cmd.INFO
+        log = Cmd.log Cmd.DEBUG
             [ "Ignoring received message while Uninitialized1"
             , show ci
             , show kpacket
             ]
+
+update (TimeoutTransactions _) (Uninitialized ix) =
+    (Uninitialized ix, Cmd.randomBytes 20 (NewNodeId ix))
 
 update (TimeoutTransactions now) (Ready state) =
     (Ready state { transactions = newtrns, routingTable = newrt }, log)
@@ -532,17 +548,16 @@ update (MaintainPeers _) m = (m, Cmd.none)
 
 
 -- Explicitly list undefined states
-update (NewNodeId _ _) (Uninitialized1 _ _) = undefined
-update (NewNodeId _ _) (Ready _) = undefined
-update (Inbound _ _ _) Uninitialized = undefined
-update (SendFirstMessage {}) Uninitialized = undefined
-update (SendFirstMessage {}) (Ready _) = undefined
-update (SendMessage {}) Uninitialized = undefined
-update (SendMessage {}) (Uninitialized1 _ _) = undefined
-update (SendResponse {}) Uninitialized = undefined
-update (SendResponse {}) (Uninitialized1 _ _) = undefined
-update (PeersFoundResult _ _ _ _) _ = undefined
-update UDPError _ = undefined
+update (NewNodeId _ _)       (Uninitialized1 _ _)  = undefined
+update (NewNodeId _ _)       (Ready _)             = undefined
+update (SendFirstMessage {}) (Uninitialized1 _ _ ) = undefined
+update (SendFirstMessage {}) (Ready _)             = undefined
+update (SendMessage {})      (Uninitialized _)     = undefined
+update (SendMessage {})      (Uninitialized1 _ _)  = undefined
+update (SendResponse {})     (Uninitialized _)     = undefined
+update (SendResponse {})     (Uninitialized1 _ _)  = undefined
+update (PeersFoundResult _ _ _ _) _                = undefined
+update UDPError              _                     = undefined
 
 {-
 subscriptions :: Model -> Sub Msg
@@ -673,7 +688,7 @@ respond
 
             bvalue = encode kpacket
 
-            logmsg = Cmd.log Cmd.INFO
+            logmsg = Cmd.log Cmd.DEBUG
                 [ "Got Peer announcement ", "info_hash:", show info
                 , maybe "" (((++) "name: ") . show) mname
                 , "replying with Pong to", show node
@@ -817,7 +832,7 @@ handleResponse
     rdat
     state = (state, log)
         where
-            log = Cmd.log Cmd.INFO
+            log = Cmd.log Cmd.DEBUG
                 [ "Ignoring unsolicited response from"
                 , show node, show rdat
                 ]
@@ -839,7 +854,7 @@ logErr
     (Error { errCode, errMsg })
     state = (state, log)
         where
-            log = Cmd.log Cmd.INFO
+            log = Cmd.log Cmd.DEBUG
                 [ "Received an Error from"
                 , show sender
                 , (show errCode) ++ ": " ++ show errMsg
@@ -858,7 +873,7 @@ onParsingErr p ci bs err = Cmd.batch [ logParsingErr ci bs err,  logmsg, reply ]
 
 logParsingErr :: CompactInfo -> ByteString -> String -> Cmd Msg
 logParsingErr ci bs err =
-    Cmd.log Cmd.INFO $
+    Cmd.log Cmd.DEBUG $
         [ "Could not parse received message. Sender:" , show ci
         , "in:" , show bs
         ]

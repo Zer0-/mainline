@@ -47,10 +47,10 @@ import Debug.Trace (trace)
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 100
+nMplex = 200
 
 msBetweenCallsToNode :: Int
-msBetweenCallsToNode = 2000
+msBetweenCallsToNode = 1500
 
 scoreAggregateSeconds :: Int
 scoreAggregateSeconds = 60
@@ -75,14 +75,18 @@ main = SQL.runSetup >> dbApp init update subscriptions SQL.connstr
 init :: (Model, Cmd MMsg)
 init =
     ( Model
-        { models = listArray (0, nMplex - 1) (replicate nMplex M.Uninitialized)
+        { models =
+            listArray (0, nMplex - 1) [M.Uninitialized i | i <- [0..nMplex]]
         , tcache = newLRU (Just $ fromIntegral $ nMplex * 10)
         , haves = newLRU (Just $ fromIntegral $ nMplex * 10)
         , queue = []
         , metadls = Map.empty
         }
-    , Cmd.batch [(Cmd.randomBytes 20 (MMsg . NewNodeId i)) | i <- [0..nMplex-1]]
+    , Cmd.batch [mkCmd i | i <- [0..nMplex-1]]
     )
+
+    where
+        mkCmd i = Cmd.randomBytes 20 (MMsg . (NewNodeId i))
 
 
 subscriptions :: Model -> Sub MMsg
@@ -92,7 +96,7 @@ subscriptions mm
     | otherwise = Sub.batch $
         (Sub.up RMsg $ Sub.batch rsubs) :
         [ Sub.udp M.servePort (\ci r -> MMsg $ M.parseReceivedBytes ci r)
-        , Sub.timer 500 ProcessQueue
+        , Sub.timer 800 ProcessQueue
         , Sub.timer (60 * 1000) (\t -> MMsg $ M.TimeoutTransactions t)
         , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ M.MaintainPeers t)
         ]
@@ -101,7 +105,7 @@ subscriptions mm
             mainms = models mm
 
             isUn :: M.Model -> Bool
-            isUn (M.Uninitialized) = True
+            isUn (M.Uninitialized _) = True
             isUn _ = False
 
             rsubs :: [ Sub R.Msg ]
@@ -264,8 +268,9 @@ update
 update (MMsg (Inbound _ ci ( KPacket { message }))) m =
     adaptResult MMsg $ M.logErr ci message m
 
-update (MMsg (SendFirstMessage { idx, sendRecipient, body, newtid })) m =
-    sendOrQueue
+update
+    (MMsg (SendFirstMessage {idx, sendRecipient, body, newtid, newNodeId}))
+    m = sendOrQueue
         (throttle (tcache m) h (fromInteger 0) msBetweenCallsToNode)
         h
         msg
@@ -274,7 +279,7 @@ update (MMsg (SendFirstMessage { idx, sendRecipient, body, newtid })) m =
 
     where
         h = hashci sendRecipient
-        msg = SendFirstMessage idx sendRecipient body newtid
+        msg = SendFirstMessage idx sendRecipient body newtid newNodeId
 
 update
     (MMsg (SendMessage { idx, sendAction, targetNode, body, newtid, when }))
@@ -529,7 +534,7 @@ queryToIndex
 
         getid (M.Ready state) = M.ourId $ M.conf state
         getid (M.Uninitialized1 conf _) = M.ourId conf
-        getid (M.Uninitialized) = -(2`e`161)
+        getid (M.Uninitialized _) = -(2`e`161)
 
         ms = assocs (models mm)
 

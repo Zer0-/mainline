@@ -185,7 +185,7 @@ update
 
             whenDone = case decodeResult of
                 Left errmsg ->
-                    Cmd.log Cmd.WARNING
+                    Cmd.log Cmd.DEBUG
                         [ "Failed to fetch", prettyIH
                         , "Reason given:", errmsg
                         ]
@@ -247,6 +247,7 @@ subscriptions t ci Handshake =
     Sub.readTCP
         t
         ci
+        (0 :: Int)
         numToRead
         ((GotHandshake t ci) . decode . bytes)
         (TCPError t ci)
@@ -261,7 +262,7 @@ subscriptions t ci Handshake =
             + 20 -- NodeID
             - BS.length bs
 
-subscriptions t ci _ = Sub.readTCP t ci numToRead mkMsg (TCPError t ci)
+subscriptions t ci _ = Sub.readTCP t ci (1 :: Int) numToRead mkMsg (TCPError t ci)
 
     where
         numToRead :: ByteString -> Int

@@ -39,7 +39,7 @@ import Architecture.Internal.Types
     , TCmd (..)
     , SocketMood (..)
     )
-import Architecture.Internal.Sub (updateSubscriptions)
+import Architecture.Internal.Sub (updateSubscriptions, hashSub)
 
 loop :: InternalState msg schemas -> Program model msg schemas -> IO ()
 loop self cfg = do
@@ -103,7 +103,9 @@ loop self cfg = do
                             error "No writes queued for new socket"
 
                 (Left tcmd) -> updateWriters tcmd self cfg
-                (Right sub) -> updateSubscriptions sub cfg self
+                (Right sub) ->
+                    if hashSub sub == (curSubHash self) then return self
+                    else updateSubscriptions sub cfg self
 
             loop newself cfg
 
@@ -154,6 +156,7 @@ run dbpool (m, cmd) fupdate subs = do
             dbpool
             subsink
             cmdsink
+            0
         )
         cfg
 

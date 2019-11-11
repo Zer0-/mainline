@@ -6,9 +6,11 @@ module Architecture.Internal.Sub
     , connectTCP
     , ciToAddr
     , mapTSub
+    , hashSub
     ) where
 
 import Prelude hiding (init)
+import Data.List (foldl')
 import Control.Monad (foldM, forever)
 import Data.Foldable (sequence_)
 import qualified Data.Map as Map
@@ -17,7 +19,7 @@ import qualified Data.ByteString as BS
 import Network.Socket (Socket, close)
 import Network.Socket.ByteString (recv, recvFrom)
 --import System.Timeout (timeout)
-import Data.Hashable (hash)
+import Data.Hashable (hash, hashWithSalt)
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import Control.Concurrent (forkIO, ThreadId, threadDelay, killThread)
 import Control.Concurrent.STM
@@ -91,26 +93,27 @@ updateSubscriptions (Sub tsubs) cfg istate = do
                 WantReads _ _ -> True
                 WantBoth _    -> False
                 HaveSocket _  -> True
-            ) . ((Map.!) (sockets istate)))
+            ) . ((Map.!) socks))
             (fullClosed writeS)
 
     -- should the SocketMood WantBoth be changed to WantWrites if it's in fullClosed?
 
-    mapM_ closeSocketMood ((sockets istate) `Map.restrictKeys` toClose)
+    mapM_ closeSocketMood (socks `Map.restrictKeys` toClose)
 
-    let
-        newstate = istate
-            { readThreadS = Map.union loaded (currentReads `Map.difference` unloads)
-            , sockets =
-                newsocks `Map.union` ((sockets istate) `Map.withoutKeys` toClose)
-            }
-
-    return newstate
+    return istate
+        { readThreadS =
+            Map.union loaded (currentReads `Map.difference` unloads)
+        , sockets =
+            newsocks `Map.union` (socks `Map.withoutKeys` toClose)
+        , curSubHash = hashSub (Sub tsubs)
+        }
 
     where
         loads =
             ( filter (\(k, _) -> Map.notMember k currentReads)
             ) tsubpairs
+
+        socks = sockets istate
 
         unloads =
             currentReads `Map.withoutKeys` (Set.fromList (map fst tsubpairs))
@@ -130,7 +133,7 @@ updateSubscriptions (Sub tsubs) cfg istate = do
                 key
                 ( case tsub of
                     (Timer _ _) -> Nothing
-                    _ -> Map.lookup key (sockets istate)
+                    _ -> Map.lookup key socks
                 )
                 tsub
             >>=
@@ -148,6 +151,7 @@ updateSubscriptions (Sub tsubs) cfg istate = do
                                 Just r -> (openSocks, newReadS r)
                                 Nothing -> (openSocks, readS)
                 )
+
 
 
 updateHandlers
@@ -169,7 +173,7 @@ updateHandlers rs tsubs =
 
 
 writeHdlr :: SubHandler msg -> TSub msg -> STM ()
-writeHdlr (TCPClientHandler tv) (TCPClient _ _ getMore h _) =
+writeHdlr (TCPClientHandler tv) (TCPClient _ _ _ getMore h _) =
     writeTVar tv (getMore, h)
 writeHdlr (UDPHandler tv) (UDP _ h) = writeTVar tv h
 writeHdlr (TimerHandler tv) (Timer _ h) = writeTVar tv h
@@ -206,7 +210,7 @@ subscribe cfg istate key msocket (UDP p h) = do
             Just _ -> error "udp sockets expected to open synchronously"
             Nothing -> openUDPPort p
 
-subscribe cfg istate key msocket (TCPClient t ci getMore h failmsg) =
+subscribe cfg istate key msocket (TCPClient t ci fkey getMore h failmsg) =
     case msocket of
         Just (HaveSocket sock) -> do
             th <- atomically (newTVar (getMore, h))
@@ -235,7 +239,7 @@ subscribe cfg istate key msocket (TCPClient t ci getMore h failmsg) =
             return (Just $ WantReads threadid tsub, Nothing)
 
     where
-        tsub = TCPClient t ci getMore h failmsg
+        tsub = TCPClient t ci fkey getMore h failmsg
 
         tmodel = fst $ init cfg
 
@@ -364,6 +368,20 @@ closeSocketMood (WantBoth _) = return ()
 
 
 mapTSub :: (msg0 -> msg1) -> TSub msg0 -> TSub msg1
-mapTSub f (TCPClient t ci g h e) = TCPClient t ci g (f . h) (f e)
-mapTSub f (UDP p h)              = UDP p (\ci -> f . (h ci))
-mapTSub f (Timer ms h)           = Timer ms (f . h)
+mapTSub f (TCPClient t ci fkey g h e) = TCPClient t ci fkey g (f . h) (f e)
+mapTSub f (UDP p h)                   = UDP p (\ci -> f . (h ci))
+mapTSub f (Timer ms h)                = Timer ms (f . h)
+
+
+-- For optimization only
+hashSub :: Sub msg -> Int
+hashSub (Sub ss) = reduceHash ss
+    where
+        reduceHash :: [ TSub msg ] -> Int
+        reduceHash = foldl' hash_ (0 :: Int)
+
+        hash_ s (TCPClient t ci fkey more h msg) = s
+            `hashWithSalt` (TCPClient t ci fkey more h msg)
+            `hashWithSalt` fkey
+
+        hash_ s sub = hashWithSalt s sub

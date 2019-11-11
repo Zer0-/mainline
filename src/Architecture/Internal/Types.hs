@@ -51,21 +51,20 @@ newtype Cmd msg schemas = Cmd [ TCmd msg schemas ]
 
 
 data TSub msg
-    = forall t. Hashable t =>
-        TCPClient t CompactInfo (BS.ByteString -> Int) (Received -> msg) msg
+    = forall t u. (Hashable t, Hashable u) =>
+        TCPClient t CompactInfo u (BS.ByteString -> Int) (Received -> msg) msg
     | UDP Port (CompactInfo -> Received -> msg)
     | Timer Int (POSIXTime -> msg) -- timeout in milliseconds
 
 
 instance Hashable (TSub msg) where
-    hashWithSalt s (TCPClient t ci _ _ _) =
+    hashWithSalt s (TCPClient t ci _ _ _ _) =
         s `hashWithSalt` (1 :: Int) `hashWithSalt` t `hashWithSalt` ci
     hashWithSalt s (UDP p _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` p
     hashWithSalt s (Timer t _) = s `hashWithSalt` (3 :: Int) `hashWithSalt` t
 
 
 newtype Sub msg = Sub [ TSub msg ]
-
 
 data Program model msg schemas =
     Program
@@ -94,6 +93,7 @@ data SubHandler msg
     | UDPHandler (TVar (CompactInfo -> Received -> msg))
     | TimerHandler (TVar (POSIXTime -> msg))
 
+
 data SocketMood msg schemas
     = WantWrites [TCmd msg schemas]
     | WantReads ThreadId (TSub msg)
@@ -108,4 +108,5 @@ data InternalState msg schemas = InternalState
     , dbPool       :: Maybe (Pool (K Connection schemas))
     , subSink      :: TMVar (Sub msg)
     , cmdSink      :: TQueue (TCmd msg schemas)
+    , curSubHash   :: Int
     }

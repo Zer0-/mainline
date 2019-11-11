@@ -21,14 +21,15 @@ import Architecture.Internal.Types
     )
 import Architecture.Internal.Sub (Received (..), mapTSub)
 
-readTCP :: Hashable t
+readTCP :: (Hashable t, Hashable u)
         => t
         -> CompactInfo
+        -> u
         -> (ByteString -> Int)
         -> (Received -> msg)
         -> msg
         -> Sub msg
-readTCP t ci g h e = Sub [ TCPClient t ci g h e ]
+readTCP t ci fkey g h e = Sub [ TCPClient t ci fkey g h e ]
 
 udp :: Port -> (CompactInfo -> Received -> msg) -> Sub msg
 udp port h = Sub [ UDP port h ]
