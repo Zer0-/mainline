@@ -158,6 +158,13 @@ data BVal
     | Le
     deriving (Eq, Show)
 
+{-
+ - Pong message parsing error:
+ -
+ - INFO - Could not parse received message. Sender: <216.164.25.77:8999>
+ - in: "d2:ip6:@\137\132\STX\200\216\&1:rd2:id20:\183\186\150\&3\143d \171\227\USDo<\ETB.\CAN \202\244\239\&1:pi51416ee1:t4:\175\166w\210\&1:v4:LT\SOH\NUL1:y1:re"
+ - scanner: [Ds,Bs "ip",Bs "@\137\132\STX\200\216",Bs "r",Ds,Bs "id",Bs "\183\186\150\&3\143d \171\227\USDo<\ETB.\CAN \202\244\239",Bs "p",BInt 51416,De,Bs "t",Bs "\175\166w\210",Bs "v",Bs "LT\SOH\NUL",Bs "y",Bs "r",De] reason: "Inbound" (line 1, column 10):
+ -}
 
 kparser :: Parser KPacket
 kparser = withObject $ do

@@ -90,7 +90,7 @@ tokensize :: Int
 tokensize = 8
 
 responseTimeout :: Int
-responseTimeout = 60
+responseTimeout = 120
 
 {- Data Structures -}
 
@@ -282,7 +282,7 @@ update
                 [ "Sending", show kpacket
                 , show targetNode ]
 
-
+-- Pong response from bootstrap node
 update
     ( Inbound
         now
@@ -797,8 +797,19 @@ handleResponse
             ourid = ourId $ cf
             idx = index cf
 
+handleResponse
+    node
+    (TransactionState _ KeepAlive _)
+    now
+    Pong
+    state = (newstate, Cmd.none)
+        where
+            newstate = state
+                { routingTable =
+                    updateTime (routingTable state) (nodeId node) now
+                }
 
--- Ignore the rest for now
+-- Ignore the rest
 handleResponse
     node
     _

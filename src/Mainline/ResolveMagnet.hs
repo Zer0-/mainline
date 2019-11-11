@@ -191,7 +191,7 @@ update
                         ]
                 Right infodict ->
                     Cmd.batch
-                    [ Cmd.log Cmd.DEBUG
+                    [ Cmd.log Cmd.INFO
                         [ prettyIH
                         , "info successfully downloaded"
                         ]

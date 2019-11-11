@@ -47,10 +47,10 @@ import Debug.Trace (trace)
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 10
+nMplex = 100
 
-callPerSecondPerCi :: Int
-callPerSecondPerCi = 1
+msBetweenCallsToNode :: Int
+msBetweenCallsToNode = 2000
 
 scoreAggregateSeconds :: Int
 scoreAggregateSeconds = 60
@@ -266,7 +266,7 @@ update (MMsg (Inbound _ ci ( KPacket { message }))) m =
 
 update (MMsg (SendFirstMessage { idx, sendRecipient, body, newtid })) m =
     sendOrQueue
-        (throttle (tcache m) h (fromInteger 0) callPerSecondPerCi)
+        (throttle (tcache m) h (fromInteger 0) msBetweenCallsToNode)
         h
         msg
         idx
@@ -280,7 +280,7 @@ update
     (MMsg (SendMessage { idx, sendAction, targetNode, body, newtid, when }))
     m =
         sendOrQueue
-            (throttle (tcache m) h when callPerSecondPerCi)
+            (throttle (tcache m) h when msBetweenCallsToNode)
             h
             msg
             idx
@@ -293,19 +293,17 @@ update
 update (MMsg (SendResponse { idx, targetNode, body, tid })) m =
     updateExplicit (SendResponse idx targetNode body tid) m idx
 
-update (ProcessQueue now) m = foldl' f (m { queue = [] }, dbg) (trace ("t Processing queue of length " ++ (show $ length (queue m))) (queue m))
+update (ProcessQueue now) m = foldl' f (m { queue = [] }, Cmd.none) (trace ("t Processing queue of length " ++ (show $ length (queue m))) (queue m))
     where
         f (model, cmds) (i, key, msg) =
             let
                 (model2, cmds2) = sendOrQueue
-                    (throttle (tcache model) key now callPerSecondPerCi)
+                    (throttle (tcache model) key now msBetweenCallsToNode)
                     key
                     msg
                     i
                     model
             in (model2, Cmd.batch [cmds, cmds2])
-
-        dbg = Cmd.log Cmd.DEBUG [ "ProcessQueue" ]
 
 update (MMsg (TimeoutTransactions now)) m =
     propagateTimer (TimeoutTransactions now) m
@@ -601,13 +599,13 @@ throttle
     => LRU a POSIXTime
     -> a
     -> POSIXTime
-    -> Int -- Maximum calls per second
+    -> Int -- ms between calls
     -> Either (LRU a POSIXTime) (LRU a POSIXTime)
-throttle cache key now cps =
+throttle cache key now ms =
     case lookup key cache of
         (_, Nothing) -> Right cache2
         (lru, Just time) ->
-            if now - time < (fromInteger 1) / (fromIntegral cps)
+            if now - time < (fromIntegral ms) / (fromIntegral (1000 :: Int))
             then Left lru
             else Right cache2
     where
