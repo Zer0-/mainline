@@ -38,7 +38,11 @@ import qualified Architecture.Cmd as Cmd
 import Architecture.Sub              (Received (..))
 import Network.KRPC                  (KPacket (..), scanner)
 import Network.KRPC.Helpers          (stringpack)
-import Network.Octets                (Octets (..), fromByteString)
+import Network.Octets
+ ( Octets (..)
+ , fromByteString
+ , octToByteString
+ )
 import Mainline.RoutingTable
     ( initRoutingTable
     , RoutingTable
@@ -461,8 +465,10 @@ update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
             , show kpacket
             ]
 
-update (TimeoutTransactions _) (Uninitialized ix) =
-    (Uninitialized ix, Cmd.randomBytes 20 (NewNodeId ix))
+update (TimeoutTransactions _) (Uninitialized1 conf _) =
+    (Uninitialized ix, Cmd.bounce $ NewNodeId ix (octToByteString (ourId conf)))
+    where
+        ix = index conf
 
 update (TimeoutTransactions now) (Ready state) =
     (Ready state { transactions = newtrns, routingTable = newrt }, log)
