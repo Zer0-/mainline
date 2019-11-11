@@ -31,6 +31,7 @@ import Control.Concurrent.STM
     , readTVar
     , writeTVar
     )
+import Control.Exception.Safe (catchIO)
 
 import Network.KRPC.Types (CompactInfo)
 import Architecture.Internal.Types
@@ -264,7 +265,10 @@ runTCPClientSub
     -> IO ()
 runTCPClientSub cfg istate key sock tfns failmsg = do
     (getMore, th) <- readTVarIO tfns
-    mbytes <- more sock getMore BS.empty
+
+    mbytes <- catchIO
+        (more sock getMore BS.empty)
+        (\_ -> return Nothing)
 
     case mbytes of
         Nothing -> do

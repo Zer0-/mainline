@@ -198,7 +198,6 @@ updateWriters (CmdSendTCP t ci bs failmsg) istate cfg =
         cmd = CmdSendTCP t ci bs failmsg
 
 updateWriters (QuitW key) istate _ = do
-    putStrLn "Quitting"
     atomically $ modifyTVar
         (writeThreadS istate)
         (Map.delete key)
