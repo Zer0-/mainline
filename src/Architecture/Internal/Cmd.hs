@@ -133,25 +133,32 @@ execCmd
 execCmd wrT sink mpool (Cmd l) =
     (mapM (execTCmd wrT sink mpool) l) >>= (return . catMaybes)
 
-
 runCmds
     :: InternalState msg schemas
     -> Program model msg schemas
-    -> IO ()
-runCmds istate cfg = do
+    -> IO Bool
+runCmds istate cfg = runCmds_ istate cfg False
+
+runCmds_
+    :: InternalState msg schemas
+    -> Program model msg schemas
+    -> Bool
+    -> IO Bool
+runCmds_ istate cfg mdlTouched = do
     msgs <- execCmd (writeThreadS istate)
                     (cmdSink istate)
                     (dbPool istate)
                     cmd
 
     case msgs of
-        [] -> return ()
+        [] -> return mdlTouched
         _ -> do
             cmds <- atomically $ foldMsgsStm (update cfg) msgs tmodel
-            runCmds istate (cfg { init = (tmodel, cmds) })
+            runCmds_ istate (cfg { init = (tmodel, cmds) }) True
 
     where
         (tmodel, cmd) = init cfg
+
 
 
 updateWriters
@@ -393,11 +400,15 @@ handleCmd
     -> Cmd msg schemas
     -> IO ()
 handleCmd cfg istate cmd = do
-    runCmds istate cfg { init = (tmodel, cmd) }
+    mdlTouched <- runCmds istate cfg { init = (tmodel, cmd) }
 
-    atomically $ do
+    if mdlTouched
+    then atomically $ do
         model <- readTVar tmodel
         putTMVar (subSink istate) ((subscriptions cfg) model)
+    else
+        return ()
+
 
     where
         tmodel = fst (init cfg)

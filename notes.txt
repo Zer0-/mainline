@@ -1,20 +1,3 @@
-- Trying 10,000 nodes on one port resulted in running out of memory (less than 8Gb were available)
-- About 330,000 nodes were added to the routing tables, my very rough estimate is that nodes add between
-  100 and 200 peers to their RT, so optimistically it's possible we were a third of the way there
-- This is before any kind of timed cleanup is implemented
-
-- trying 1000 nodes after stm upgrade (also with a fix for the main memory issue
-    but still on a single port) peaked cpu at 286% (avg about 120-150%)
-    and 38% memory, 397k+ nodes added, 37k unique info hashes announced, more are being added.
-    There is no strict end condition to this test.
-
-    - I hope the cpu usage goes down after the warmup is complete, there is a chance
-    that we are just going through the warmup process as fast as we can on one port
-    (and therefore one read thread).
-
-    - pausing xterm scrolling leaves cpu at 8%!
-
-
 Maybe
 -----
 
@@ -27,9 +10,13 @@ Then we have Network.{Mainline, KRPC, Bittorrent}
 Priority
 --------
 
-Misc
-----
-  - in a lib we depend on, BEncode instance for InfoDict encodes the dict it
-  is given to get the info hash. This is wasteful since the dict itself was probably
-  just decoded from a bytestring. Maybe the info hash need not be part of the
-  data structure so we can just compute it from the original bytestring?
+- fix non-exhaustive update function in ResolveMagnet ✓
+- fix recvBuf failure (caused by recv or TCP connection failure): ✓
+        Mainline: Network.Socket.recvBuf: resource vanished (Connection reset by peer)
+- fix sendBuf for the same reason
+- Mainline: /dev/urandom: openFd: resource exhausted (Too many open files)
+    - How do we know that this is caused by too many open tcp sockets?
+    - How do we know this is not caused by trying to send too many things out?
+    - Or a failure to write to db. Threads shouldn't be quitting unexpectedly.
+- mismatch between "successfully downloaded" messsages and number of things
+  in db
