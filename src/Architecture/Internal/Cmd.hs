@@ -9,7 +9,7 @@ module Architecture.Internal.Cmd
     , batch
     , updateWriters
     , mapTCmd
-    , foldMsgsStm
+    , updateOnFailure
     , handleCmd
     ) where
 
@@ -44,6 +44,7 @@ import Control.Concurrent.STM
     , modifyTVar
     , putTMVar
     )
+import Control.Exception.Safe (catchIO)
 import Squeal.PostgreSQL (Connection, Pool, usingConnectionPool)
 import Generics.SOP (K (..))
 
@@ -239,6 +240,9 @@ updateWriters_
         -> Int
         -> TQueue (TCmd msg schemas)
         -> Socket
+        -> InternalState msg schemas
+        -> Program model msg schemas
+        -> msg
         -> IO ()
         )
     -> (TQueue a -> CmdQ)
@@ -284,6 +288,9 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
                                         key
                                         (cmdSink istate)
                                         sock
+                                        istate
+                                        cfg
+                                        failmsg
                                     )
 
                     atomically $ modifyTVar
@@ -295,13 +302,18 @@ updateWriters_ cmd istate cfg getsock failmsg getq threadmain initCmdQ = do
     where
         quit = Map.null (readThreadS istate)
         key = getKey cmd
-        tmodel = fst $ init cfg
-        onFail = do
-            cmd_ <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
-            handleCmd cfg istate cmd_
-
+        onFail = updateOnFailure istate cfg failmsg
         putsockm s = istate { sockets = Map.insert key s (sockets istate) }
 
+
+updateOnFailure
+    :: InternalState msg schemas
+    -> Program model msg schemas
+    -> msg
+    -> IO ()
+updateOnFailure istate cfg failmsg = do
+    cmd <- atomically $ foldMsgsStm (update cfg) [failmsg] (fst $ init cfg)
+    handleCmd cfg istate cmd
 
 
 writeUDPMain
@@ -310,8 +322,12 @@ writeUDPMain
     -> Int
     -> TQueue (TCmd msg schemas)
     -> Socket
+    -> InternalState msg schemas
+    -> Program model msg schemas
+    -> msg
     -> IO ()
-writeUDPMain q quit key qsink sock = runMain q quit key qsink sock send
+writeUDPMain q quit key qsink sock istate cfg failmsg =
+    runMain q quit key qsink sock send istate cfg failmsg
     where
         send (ci, bs) = sendTo sock bs (ciToAddr ci) >> return ()
 
@@ -322,8 +338,12 @@ writeTCPMain
     -> Int
     -> TQueue (TCmd msg schemas)
     -> Socket
+    -> InternalState msg schemas
+    -> Program model msg schemas
+    -> msg
     -> IO ()
-writeTCPMain q quit key qsink sock = runMain q quit key qsink sock send
+writeTCPMain q quit key qsink sock istate cfg failmsg =
+    runMain q quit key qsink sock send istate cfg failmsg
     where
         send = sendAll sock
 
@@ -335,14 +355,19 @@ runMain
     -> TQueue (TCmd msg schemas)
     -> Socket
     -> (a -> IO ())
+    -> InternalState msg schemas
+    -> Program model msg schemas
+    -> msg
     -> IO ()
-runMain q quit key qsink sock fsend = do
+runMain q quit key qsink sock fsend istate cfg failmsg = do
     msend <- atomically $ lexpr `orElse` rexpr
 
     case msend of
         Just x -> do
-            fsend x
-            runMain q quit key qsink sock fsend
+            ok <- catchIO (fsend x >> return True) (\_ -> return False)
+            if not ok then updateOnFailure istate cfg failmsg >> again
+            else again
+
         Nothing -> do
             atomically $ writeTQueue qsink (QuitW key)
             return ()
@@ -350,6 +375,7 @@ runMain q quit key qsink sock fsend = do
     where
         lexpr = readTQueue q >>= return . Just
         rexpr = readTVar quit >>= \q_ -> if q_ then (return Nothing) else retry
+        again = runMain q quit key qsink sock fsend istate cfg failmsg
 
 
 sinkTCmd

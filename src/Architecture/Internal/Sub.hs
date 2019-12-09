@@ -43,7 +43,7 @@ import Architecture.Internal.Types
     , Sub (..)
     , SocketMood (..)
     )
-import Architecture.Internal.Cmd (foldMsgsStm, handleCmd)
+import Architecture.Internal.Cmd (updateOnFailure, handleCmd)
 import Architecture.Internal.Network
     ( openUDPPort
     , connectTCP
@@ -241,12 +241,7 @@ subscribe cfg istate key msocket (TCPClient t ci fkey getMore h failmsg) =
 
     where
         tsub = TCPClient t ci fkey getMore h failmsg
-
-        tmodel = fst $ init cfg
-
-        onFail = do
-            cmd <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
-            handleCmd cfg istate cmd
+        onFail = updateOnFailure istate cfg failmsg
 
 
 subscribe cfg istate key _ (Timer ms h) = do
@@ -271,9 +266,7 @@ runTCPClientSub cfg istate key sock tfns failmsg = do
         (\_ -> return Nothing)
 
     case mbytes of
-        Nothing -> do
-            cmd <- atomically $ foldMsgsStm (update cfg) [failmsg] tmodel
-            handleCmd cfg istate cmd
+        Nothing -> updateOnFailure istate cfg failmsg
         Just bytes -> do
             now <- getPOSIXTime
 
