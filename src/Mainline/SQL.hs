@@ -51,7 +51,6 @@ import Squeal.PostgreSQL
     , (>>>)
     , integer
     , vararray
-    , text
     , foreignKey
     , OnDeleteClause (..)
     , OnUpdateClause (..)
@@ -146,7 +145,7 @@ setup =
         (  serial `as` #info_id
         :* ( bytea & notNullable ) `as` #info_hash
         :* ( integer & notNullable ) `as` #piece_len_bytes
-        :* ( text & notNullable ) `as` #name
+        :* ( bytea & notNullable ) `as` #name
         :* ( timestampWithTimeZone
                 & notNullable & default_ currentTimestamp ) `as` #added
         :* ( doublePrecision & notNullable & default_ 0 ) `as` #score
@@ -158,7 +157,7 @@ setup =
 
     createTableIfNotExists #file_info
         (  (integer & notNullable) `as` #info_id
-        :* ( vararray text & notNullable )`as` #filepath
+        :* ( vararray bytea & notNullable )`as` #filepath
         :* ( integer & notNullable ) `as` #size_bytes
         )
         (  primaryKey (#info_id :* #filepath) `as` #file_pk
