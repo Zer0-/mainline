@@ -175,5 +175,5 @@ dbApp
     -> ByteString
     -> IO ()
 dbApp initial fupdate subs connstr = do
-    pool <- createConnectionPool connstr 1 1 10
+    pool <- createConnectionPool connstr 1 1 4
     run (Just pool) initial fupdate subs

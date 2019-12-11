@@ -41,7 +41,9 @@ data TCmd msg schemas
     | CmdReadFile String (BS.ByteString -> msg)
     | CmdWriteFile String BS.ByteString
     | forall result.
-        CmdDatabase (PQ schemas schemas IO result) (Maybe (result -> msg))
+        CmdDatabase
+            (PQ schemas schemas IO result)
+            (Either msg (Maybe result -> msg))
     | CmdBounce msg
     | SocketResult Int (Maybe Socket)
     | QuitW Int

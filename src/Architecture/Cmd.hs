@@ -38,7 +38,7 @@ import Architecture.Internal.Types
 
 -- TODO: use a config
 minLoglvl :: Int
-minLoglvl = fromEnum INFO
+minLoglvl = fromEnum DEBUG
 
 
 getRandom :: (Float -> msg) -> Cmd msg schemas
@@ -87,8 +87,10 @@ readFile filename f = Cmd [ CmdReadFile filename f ]
 writeFile :: String -> ByteString -> Cmd msg schemas
 writeFile filename bs = Cmd [ CmdWriteFile filename bs ]
 
-
-db :: PQ schemas schemas IO result -> Maybe (result -> msg) -> Cmd msg schemas
+db
+    :: PQ schemas schemas IO result
+    -> Either msg (Maybe result -> msg)
+    -> Cmd msg schemas
 db schemas f = Cmd [ CmdDatabase schemas f ]
 
 up :: (msg0 -> msg1) -> Cmd msg0 schemas -> Cmd msg1 schemas

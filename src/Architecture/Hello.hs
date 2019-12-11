@@ -32,6 +32,7 @@ data Msg
     | Got Sub.Received
     | Timeout POSIXTime
     | PGResult Float
+    | PGError
 
 init :: (Model, Cmd.Cmd Msg EmptySchema)
 init = (0, Cmd.getRandom Increment)
@@ -40,11 +41,13 @@ update :: Msg -> Model -> (Model, Cmd.Cmd Msg EmptySchema)
 update (Increment i) n = (n, Cmd.batch [ cmdlog, dbcmd ])
     where
         cmdlog = Cmd.log Cmd.DEBUG [ show n, show i, show $ n + i ]
-        dbcmd = Cmd.db (session i) (Just PGResult)
+        dbcmd = Cmd.db (session i) (Right $ maybe PGError PGResult)
 
 update (PGResult ii) n = (n + ii, cmdlog)
     where
         cmdlog = Cmd.log Cmd.INFO [ "DB result:", show ii, show (n + ii) ]
+
+update PGError n = (n, Cmd.log Cmd.WARNING [ "DB Error!" ])
 
 update (Got msg) n =
     ( n
@@ -68,6 +71,7 @@ type EmptySchema = Public '[]
 
 query :: Query_ EmptySchema (Only Float) (Only Float)
 query = values_ $ ((param @1) + (param @1)) `as` #fromOnly
+--query = values_ $ ((param @1) / 0) `as` #fromOnly
 
 
 session :: Float -> PQ EmptySchema EmptySchema IO Float

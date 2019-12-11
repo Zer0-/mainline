@@ -44,8 +44,13 @@ import Control.Concurrent.STM
     , modifyTVar
     , putTMVar
     )
-import Control.Exception.Safe (catchIO)
-import Squeal.PostgreSQL (Connection, Pool, usingConnectionPool)
+import Control.Exception.Safe (catch, catchIO)
+import Squeal.PostgreSQL
+    ( Connection
+    , Pool
+    , usingConnectionPool
+    , SquealException
+    )
 import Generics.SOP (K (..))
 
 import Network.KRPC.Types (CompactInfo (CompactInfo))
@@ -109,11 +114,15 @@ execTCmd _ _ _ (CmdSendUDP _ (CompactInfo ip 0) _ failmsg) = do
         msg = "Error: Cannot send message to " ++ show (CompactInfo ip 0)
             ++ ". Invalid port 0!"
 
-execTCmd _ _ (Just pool) (CmdDatabase session (Just handler)) =
-    usingConnectionPool pool $ session >>= return . Just . handler
+execTCmd _ _ (Just pool) (CmdDatabase session (Right handler)) =
+    catch
+        (usingConnectionPool pool $ session >>= return . Just . handler . Just)
+        (ignoreReturnErr_ $ handler Nothing)
 
-execTCmd _ _ (Just pool) (CmdDatabase session Nothing) =
-    usingConnectionPool pool $ session >> return Nothing
+execTCmd _ _ (Just pool) (CmdDatabase session (Left failmsg)) =
+    catch
+        (usingConnectionPool pool $ session >> return Nothing)
+        (ignoreReturnErr_ failmsg)
 
 execTCmd _ _ Nothing (CmdDatabase _ _) = undefined
 
@@ -124,6 +133,8 @@ execTCmd wrT sink _ (CmdSendTCP t ci bs msg) = do
 
 execTCmd wrT sink _ cmd = atomically $ sinkTCmd wrT sink cmd >> return Nothing
 
+ignoreReturnErr_ :: msg -> SquealException -> IO (Maybe msg)
+ignoreReturnErr_ m = \_ -> return $ Just m
 
 execCmd
     :: TVar (Map Int (CmdQ, a, ThreadId))
@@ -455,16 +466,16 @@ getKey _                          = undefined
 
 
 mapTCmd :: (msg0 -> msg1) -> TCmd msg0 schemas -> TCmd msg1 schemas
-mapTCmd _ (CmdLog a)                  = CmdLog a
-mapTCmd f (CmdGetRandom h)            = CmdGetRandom (f . h)
-mapTCmd f (CmdGetTime h)              = CmdGetTime (f . h)
-mapTCmd f (CmdRandomBytes n h)        = CmdRandomBytes n (f . h)
-mapTCmd f (CmdSendUDP p ci bs err)    = CmdSendUDP p ci bs (f err)
-mapTCmd f (CmdSendTCP t ci bs err)    = CmdSendTCP t ci bs (f err)
-mapTCmd f (CmdReadFile p h)           = CmdReadFile p (f . h)
-mapTCmd _ (CmdWriteFile p bs)         = CmdWriteFile p bs
-mapTCmd f (CmdDatabase sesh (Just h)) = CmdDatabase sesh (Just $ f . h)
-mapTCmd _ (CmdDatabase sesh Nothing)  = CmdDatabase sesh Nothing
-mapTCmd f (CmdBounce m)               = CmdBounce (f m)
-mapTCmd _ (SocketResult i ms)         = SocketResult i ms
-mapTCmd _ (QuitW i)                   = QuitW i
+mapTCmd _ (CmdLog a)                    = CmdLog a
+mapTCmd f (CmdGetRandom h)              = CmdGetRandom (f . h)
+mapTCmd f (CmdGetTime h)                = CmdGetTime (f . h)
+mapTCmd f (CmdRandomBytes n h)          = CmdRandomBytes n (f . h)
+mapTCmd f (CmdSendUDP p ci bs err)      = CmdSendUDP p ci bs (f err)
+mapTCmd f (CmdSendTCP t ci bs err)      = CmdSendTCP t ci bs (f err)
+mapTCmd f (CmdReadFile p h)             = CmdReadFile p (f . h)
+mapTCmd _ (CmdWriteFile p bs)           = CmdWriteFile p bs
+mapTCmd f (CmdDatabase sesh (Right h))  = CmdDatabase sesh (Right $ f . h)
+mapTCmd f (CmdDatabase sesh (Left err)) = CmdDatabase sesh (Left $ f err)
+mapTCmd f (CmdBounce m)                 = CmdBounce (f m)
+mapTCmd _ (SocketResult i ms)           = SocketResult i ms
+mapTCmd _ (QuitW i)                     = QuitW i

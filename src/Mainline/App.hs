@@ -30,6 +30,7 @@ import Network.KRPC.Types
     , CompactInfo (..)
     , InfoHash
     )
+import Network.KRPC.Helpers (hexify)
 import Network.Octets (octToByteString)
 import Mainline.RoutingTable (RoutingTable (..), nclosest)
 import qualified Mainline.ResolveMagnet as R
@@ -68,6 +69,10 @@ data MMsg
     | RMsg R.Msg
     | ProcessQueue POSIXTime
     | DBHasInfo POSIXTime Integer Int Bool
+    | DBInfoLookupFail
+    | DBSetScoreFail
+    | DBSaveOK Integer
+    | DBSaveFail Integer
 
 main :: IO ()
 main = SQL.runSetup >> dbApp init update subscriptions SQL.connstr
@@ -193,7 +198,7 @@ update
         checkdb =
             Cmd.db
                 (SQL.queryExists (octToByteString infohash))
-                (Just $ DBHasInfo now infohash idx)
+                (Right (maybe DBInfoLookupFail (DBHasInfo now infohash idx)))
 
         logmsg = Cmd.log Cmd.DEBUG [ "query if db has", show infohash ]
 
@@ -203,7 +208,7 @@ update
                     (octToByteString infohash)
                     (calculateScore score now)
                 )
-                Nothing
+                (Left DBSetScoreFail)
 
 
 update (DBHasInfo t infohash _ True) model =
@@ -318,15 +323,20 @@ update (MMsg (MaintainPeers now)) m =
 
 update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
     | Map.member infohash dls =
-        ( model { metadls = Map.insert infohash newMdls dls }
-        , Cmd.up RMsg (Cmd.batch newcmds)
+        ( model { metadls = metadlsB }
+        , Cmd.batch [Cmd.up RMsg (Cmd.batch newcmds), mklog metadlsB]
         )
     | otherwise =
-        ( model { metadls = Map.insert infohash (R.Off, initialMdls, idx) dls }
-        , Cmd.up RMsg (Cmd.batch cmds)
+        ( model { metadls = metadlsA }
+        , Cmd.batch [Cmd.up RMsg (Cmd.batch cmds), mklog metadlsA]
         )
 
     where
+        mklog x = Cmd.log Cmd.DEBUG
+            [ show $ countOngoingDls x
+            , "ongoing metainfo downloads after peersfound"
+            ]
+
         cmds :: [Cmd R.Msg]
         cmds = map snd inits
 
@@ -342,6 +352,8 @@ update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
             R.update (R.DownloadInfo nodeid infohash ci) R.Off
 
         dls = metadls model
+
+        metadlsA = Map.insert infohash (R.Off, initialMdls, idx) dls
 
         -- For the case of existing download
         existingInfo = dls Map.! infohash
@@ -360,6 +372,9 @@ update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
         newcmds = map (snd . snd) $
             filter (((flip Map.notMember) existingMdls) . fst) rinfo
 
+        metadlsB = Map.insert infohash newMdls dls
+
+
 update (MMsg UDPError) model = (model, Cmd.log Cmd.WARNING ["UDPError"])
 
 update (RMsg (R.Have now infohash infodict)) model =
@@ -372,7 +387,9 @@ update (RMsg (R.Have now infohash infodict)) model =
     )
 
     where
-        insertdb = Cmd.db insertSchema Nothing
+        insertdb = Cmd.db
+            insertSchema
+            (Right $ maybe (DBSaveFail infohash) (\_ -> DBSaveOK infohash))
 
         insertSchema = SQL.insertInfo
             (octToByteString infohash)
@@ -504,6 +521,25 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
             = R.Downloading sz msgid lastBlk blks
         mergeDls _ _ = undefined
 
+update DBInfoLookupFail model =
+    (model, Cmd.log Cmd.WARNING [ "Failed to lookup infohash in database!"])
+
+update DBSetScoreFail model =
+    (model, Cmd.log Cmd.WARNING [ "Failed to set new score in database!"])
+
+update (DBSaveOK infohash) model = (model, logmsg)
+    where
+        logmsg = Cmd.log Cmd.INFO
+            [ "Information saved to database OK:"
+            , show $ hexify $ octToByteString infohash
+            ]
+
+update (DBSaveFail infohash) model = (model, logmsg)
+    where
+        logmsg = Cmd.log Cmd.WARNING
+            [ "FAILED to save info to database:"
+            , show $ hexify $ octToByteString infohash
+            ]
 
 queryToIndex :: Message -> Model -> Int
 queryToIndex
@@ -621,6 +657,9 @@ hashci (CompactInfo ip port) = hashWithSalt (hash ip) port
 
 adaptResult :: (msg0 -> msg1) -> (a, Cmd msg0) -> (a, Cmd msg1)
 adaptResult f (model, cmd) = (model, Cmd.up f cmd)
+
+countOngoingDls :: Map.Map a (b, Map.Map c b, d) -> Int
+countOngoingDls m = sum $ map (\(_, s, _) -> Map.size s) (Map.elems m)
 
 e :: Integer -> Integer -> Integer
 e = (^)
