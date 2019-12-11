@@ -2,7 +2,6 @@
 
 import Prelude hiding (init, lookup)
 import Data.Maybe (isJust)
-import Data.Text (Text)
 import Data.Int (Int32)
 import qualified Data.Map as Map
 import Data.Array (Array, listArray, indices, (!), (//), assocs)
@@ -14,7 +13,6 @@ import Data.Cache.LRU (LRU, newLRU, lookup, insert)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (hashWithSalt, hash)
 import Data.ByteString (ByteString)
-import Data.Text.Encoding (decodeUtf8)
 
 import qualified Architecture.Cmd as Cmd
 import Architecture.TEA (dbApp)
@@ -394,7 +392,7 @@ update (RMsg (R.Have now infohash infodict)) model =
         insertSchema = SQL.insertInfo
             (octToByteString infohash)
             (fromIntegral $ piPieceLength pieceInfo)
-            (decodeUtf8 $ getName layoutInfo)
+            (getName layoutInfo)
             (calculateScore 1 now)
             (unHashList $ piPieceHashes pieceInfo)
             (getFileTups layoutInfo)
@@ -407,18 +405,16 @@ update (RMsg (R.Have now infohash infodict)) model =
         getName SingleFile { liFile } = fiName liFile
         getName MultiFile { liDirName } = liDirName
 
-        getFileTups :: LayoutInfo -> [([Text], Int32)]
+        getFileTups :: LayoutInfo -> [([ByteString], Int32)]
         getFileTups SingleFile { liFile } =
-            [( [decodeUtf8 $ fiName liFile]
+            [( [fiName liFile]
             ,  fromIntegral $ fiLength liFile
             )]
         getFileTups MultiFile { liFiles } = map mkFileTup liFiles
 
-        mkFileTup :: FileInfo [ByteString] -> ([Text], Int32)
+        mkFileTup :: FileInfo [ByteString] -> ([ByteString], Int32)
         mkFileTup FileInfo { fiLength, fiName } =
-            ( map decodeUtf8 fiName
-            , fromIntegral $ fiLength
-            )
+            (fiName, fromIntegral $ fiLength)
 
         -- remove gettingPeers entry from particular model
         dlinfo = Map.lookup infohash (metadls model)

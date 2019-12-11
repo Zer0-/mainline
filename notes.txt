@@ -22,3 +22,4 @@ Priority
   in db
   - see how db errors are handled start. Then see if we can use catchIO on it. ✓
         (needs catch, not catchIO)
+- store filenames in db as byte array ✓

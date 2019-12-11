@@ -22,7 +22,6 @@ import Generics.SOP (NP (..))
 import Data.Int (Int32)
 import Data.Maybe (isJust)
 import Data.ByteString (ByteString)
-import Data.Text (Text)
 import Squeal.PostgreSQL
     ( Public
     , PQ
@@ -114,7 +113,7 @@ type MetaInfoColumns =
    '[ "info_id"         ::: 'Def   :=> 'NotNull 'PGint4
     , "info_hash"       ::: 'NoDef :=> 'NotNull 'PGbytea
     , "piece_len_bytes" ::: 'NoDef :=> 'NotNull 'PGint4
-    , "name"            ::: 'NoDef :=> 'NotNull 'PGtext
+    , "name"            ::: 'NoDef :=> 'NotNull 'PGbytea
     , "added"           ::: 'Def   :=> 'NotNull 'PGtimestamptz
     , "score"           ::: 'Def   :=> 'NotNull 'PGfloat8
     ]
@@ -126,7 +125,7 @@ type FileInfoConstraints =
 
 type FileInfoColumns =
    '[ "info_id"    ::: 'NoDef :=> 'NotNull 'PGint4
-    , "filepath"   ::: 'NoDef :=> 'NotNull ('PGvararray ('NotNull 'PGtext))
+    , "filepath"   ::: 'NoDef :=> 'NotNull ('PGvararray ('NotNull 'PGbytea))
     , "size_bytes" ::: 'NoDef :=> 'NotNull 'PGint4
     ]
 
@@ -218,7 +217,7 @@ mInsertMetaInfo i = insertInto #meta_info
 type InfoParamsType =
    '[ 'NotNull 'PGbytea
     , 'NotNull 'PGint4
-    , 'NotNull 'PGtext
+    , 'NotNull 'PGbytea
     , 'NotNull 'PGbytea
     ]
 
@@ -239,7 +238,7 @@ type FileVal = NP
 
 
 mInsertFiles
-    :: [(Int32, [Text], Int32)]
+    :: [(Int32, [ByteString], Int32)]
     -> Manipulation_ Schemas () ()
 mInsertFiles haskValues =
     insertInto_ #file_info
@@ -249,7 +248,7 @@ mInsertFiles haskValues =
         )
 
     where
-        mkRow :: (Int32, [Text], Int32) -> FileVal
+        mkRow :: (Int32, [ByteString], Int32) -> FileVal
         mkRow (iid, path, size) =
             (  Set (literal iid) `as` #info_id
             :* Set (array $ map literal path) `as` #filepath
@@ -258,7 +257,7 @@ mInsertFiles haskValues =
 
 mInsertInfo
     :: Double
-    -> Manipulation_ Schemas (ByteString, Int32, Text, ByteString) (Only Int32)
+    -> Manipulation_ Schemas (ByteString, Int32, ByteString, ByteString) (Only Int32)
 mInsertInfo score =
     with ((mInsertMetaInfo score) `as` #tmp_info_id) insPieces
 
@@ -276,7 +275,7 @@ mInsertInfo score =
 insertInfoA
     :: ByteString -- infohash
     -> Int32      -- piece_len_bytes
-    -> Text       -- name
+    -> ByteString -- name
     -> Double     -- score
     -> ByteString -- pieces hash blob
     -> PQ Schemas Schemas IO (Maybe (Only Int32))
@@ -289,10 +288,10 @@ insertInfoA infohash piecelen name score piecesBs = do
 insertInfo
     :: ByteString -- infohash
     -> Int32      -- piece_len_bytes
-    -> Text       -- name
+    -> ByteString -- name
     -> Double     -- score
     -> ByteString -- pieces hash blob
-    -> [([Text], Int32)] -- files (path, size)
+    -> [([ByteString], Int32)] -- files (path, size)
     -> PQ Schemas Schemas IO ()
 insertInfo infohash piecelen name score piecesBs filetups =
     transactionally_ $ do
