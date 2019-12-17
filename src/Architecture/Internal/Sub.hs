@@ -11,12 +11,12 @@ module Architecture.Internal.Sub
 
 import Prelude hiding (init)
 import Data.List (foldl')
-import Control.Monad (foldM, forever)
+import Control.Monad (foldM)
 import Data.Foldable (sequence_)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.ByteString as BS
-import Network.Socket (Socket, close)
+import Network.Socket (Socket, close, SockAddr)
 import Network.Socket.ByteString (recv, recvFrom)
 --import System.Timeout (timeout)
 import Data.Hashable (hash, hashWithSalt)
@@ -31,7 +31,8 @@ import Control.Concurrent.STM
     , readTVar
     , writeTVar
     )
-import Control.Exception.Safe (catchIO)
+import Control.Concurrent.MVar (MVar, takeMVar, putMVar, newEmptyMVar)
+import Control.Exception.Safe (catchIO, onException)
 
 import Network.KRPC.Types (CompactInfo)
 import Architecture.Internal.Types
@@ -202,7 +203,10 @@ subscribe
 subscribe cfg istate key msocket (UDP p h) = do
     th <- atomically (newTVar h)
     sock <- getsock
-    threadId <- forkIO (runUDPSub cfg istate key sock th)
+    threadId <- forkIO $
+        killableProducerConsumer
+            (udpProduce sock)
+            (udpConsume cfg istate key th)
     return (Just $ HaveSocket sock, Just (UDPHandler th, threadId))
 
     where
@@ -215,7 +219,10 @@ subscribe cfg istate key msocket (TCPClient t ci fkey getMore h failmsg) =
     case msocket of
         Just (HaveSocket sock) -> do
             th <- atomically (newTVar (getMore, h))
-            threadId <- forkIO $ runTCPClientSub cfg istate key sock th failmsg
+            threadId <- forkIO $
+                killableProducerConsumer
+                    (tcpClientProduce th sock)
+                    (tcpClientConsume cfg istate th key failmsg)
             return (Just $ HaveSocket sock, Just (TCPClientHandler th, threadId))
 
         Just (WantWrites tcmdq) ->
@@ -234,7 +241,7 @@ subscribe cfg istate key msocket (TCPClient t ci fkey getMore h failmsg) =
                 (cmdSink istate)
                 onFail
 
-            -- do we need need the TSub in SocketMood state? We do need the
+            -- do we need the TSub in SocketMood state? We do need the
             -- list of queued up Cmds.
 
             return (Just $ WantReads threadid tsub, Nothing)
@@ -246,47 +253,25 @@ subscribe cfg istate key msocket (TCPClient t ci fkey getMore h failmsg) =
 
 subscribe cfg istate key _ (Timer ms h) = do
     th <- atomically (newTVar h)
-    threadId <- forkIO $ runTimerSub cfg istate key ms th
+    threadId <- forkIO $
+        killableProducerConsumer
+            (timerProduce ms)
+            (timerConsume cfg istate key th)
     return $ (Nothing, Just $ (TimerHandler th, threadId))
 
 
-runTCPClientSub
-    :: Program model msg schemas
-    -> InternalState msg schemas
-    -> Int
+tcpClientProduce
+    :: TVar (BS.ByteString -> Int, Received -> msg)
     -> Socket
-    -> TVar (BS.ByteString -> Int, Received -> msg)
-    -> msg
-    -> IO ()
-runTCPClientSub cfg istate key sock tfns failmsg = do
-    (getMore, th) <- readTVarIO tfns
+    -> IO (Maybe BS.ByteString)
+tcpClientProduce tfns sock = do
+    (getMore, _) <- readTVarIO tfns
 
-    mbytes <- catchIO
+    catchIO
         (more sock getMore BS.empty)
         (\_ -> return Nothing)
 
-    case mbytes of
-        Nothing -> updateOnFailure istate cfg failmsg
-        Just bytes -> do
-            now <- getPOSIXTime
-
-            cmd <- atomically $ do
-                model <- readTVar tmodel
-
-                let (model2, cmd) = (update cfg) (th (Received bytes now)) model
-
-                writeTVar tmodel model2
-
-                updateOwnHandler key (TCPClientHandler tfns) ((subscriptions cfg) model2)
-
-                return cmd
-
-            handleCmd cfg istate cmd
-            runTCPClientSub cfg istate key sock tfns failmsg
-
     where
-        tmodel = fst (init cfg)
-
         more s f msg =
             let n = f msg in
             if n < 1 then return (Just msg)
@@ -295,30 +280,29 @@ runTCPClientSub cfg istate key sock tfns failmsg = do
                 if BS.length bs == 0 then return Nothing
                 else more s f (msg <> bs)
 
-
-runUDPSub
+tcpClientConsume
     :: Program model msg schemas
     -> InternalState msg schemas
+    -> TVar (BS.ByteString -> Int, Received -> msg)
     -> Int
-    -> Socket
-    -> TVar (CompactInfo -> Received -> msg)
+    -> msg
+    -> (Maybe BS.ByteString)
     -> IO ()
-runUDPSub cfg istate key sock tHandler = forever $ do
-    (bs, sockAddr) <- recvFrom sock maxline
+tcpClientConsume cfg istate _ _ failmsg Nothing =
+    updateOnFailure istate cfg failmsg
+tcpClientConsume cfg istate tfns key _ (Just bytes) = do
     now <- getPOSIXTime
+
+    (_, th) <- readTVarIO tfns
 
     cmd <- atomically $ do
         model <- readTVar tmodel
-        th <- readTVar tHandler
 
-        let (model2, cmd) =
-                        (update cfg)
-                            (th (addrToCi sockAddr) (Received bs now))
-                            model
+        let (model2, cmd) = (update cfg) (th (Received bytes now)) model
 
         writeTVar tmodel model2
 
-        updateOwnHandler key (UDPHandler tHandler) ((subscriptions cfg) model2)
+        updateOwnHandler key (TCPClientHandler tfns) ((subscriptions cfg) model2)
 
         return cmd
 
@@ -327,27 +311,61 @@ runUDPSub cfg istate key sock tHandler = forever $ do
     where
         tmodel = fst (init cfg)
 
+udpProduce :: Socket -> IO (Maybe (BS.ByteString, SockAddr))
+udpProduce sock = recvFrom sock maxline >>= return . Just
 
-runTimerSub
+udpConsume
     :: Program model msg schemas
     -> InternalState msg schemas
-    -> Int -- key
-    -> Int -- timeout (ms)
-    -> TVar (POSIXTime -> msg)
+    -> Int
+    -> TVar (CompactInfo -> Received -> msg)
+    -> Maybe (BS.ByteString, SockAddr)
     -> IO ()
-runTimerSub cfg istate key ms tHandler = forever $ do
-    threadDelay (1000 * ms)
+udpConsume _ _ _ _ Nothing = undefined
+udpConsume cfg istate key tth (Just (bs, sockAddr)) = do
     now <- getPOSIXTime
 
     cmd <- atomically $ do
         model <- readTVar tmodel
-        th <- readTVar tHandler
+        th <- readTVar tth
+
+        let (model2, cmd) =
+                        (update cfg)
+                            (th (addrToCi sockAddr) (Received bs now))
+                            model
+
+        writeTVar tmodel model2
+
+        updateOwnHandler key (UDPHandler tth) ((subscriptions cfg) model2)
+
+        return cmd
+
+    handleCmd cfg istate cmd
+
+    where
+        tmodel = fst (init cfg)
+
+timerProduce :: Int -> IO (Maybe POSIXTime)
+timerProduce ms = threadDelay (1000 * ms) >> getPOSIXTime >>= return . Just
+
+timerConsume
+    :: Program model msg schemas
+    -> InternalState msg schemas
+    -> Int -- key
+    -> TVar (POSIXTime -> msg)
+    -> Maybe (POSIXTime)
+    -> IO ()
+timerConsume _ _ _ _ Nothing = undefined
+timerConsume cfg istate key tth (Just now) = do
+    cmd <- atomically $ do
+        model <- readTVar tmodel
+        th <- readTVar tth
 
         let (model2, cmd) = (update cfg) (th now) model
 
         writeTVar tmodel model2
 
-        updateOwnHandler key (TimerHandler tHandler) ((subscriptions cfg) model2)
+        updateOwnHandler key (TimerHandler tth) ((subscriptions cfg) model2)
 
         return cmd
 
@@ -382,3 +400,27 @@ hashSub (Sub ss) = reduceHash ss
             `hashWithSalt` fkey
 
         hash_ s sub = hashWithSalt s sub
+
+
+killableProducerConsumer :: IO (Maybe a) -> (Maybe a -> IO ()) -> IO ()
+killableProducerConsumer ioproduce ioconsume = do
+    msgs <- newEmptyMVar
+    _ <- forkIO $ consumer ioconsume msgs
+
+    let loop = do
+            mval <- ioproduce
+            putMVar msgs (Just mval)
+
+            case mval of
+                Just _ -> loop
+                Nothing -> putMVar msgs Nothing
+
+    loop `onException` putMVar msgs Nothing
+
+
+consumer :: (Maybe a -> IO ()) -> MVar (Maybe (Maybe a)) -> IO ()
+consumer consume mvar = do
+    mx <- takeMVar mvar
+    case mx of
+        Nothing -> return ()
+        Just x -> consume x >> consumer consume mvar
