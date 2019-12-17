@@ -268,7 +268,14 @@ subscriptions t ci Handshake =
             + 20 -- NodeID
             - BS.length bs
 
-subscriptions t ci _ = Sub.readTCP t ci (1 :: Int) numToRead mkMsg (TCPError t ci)
+subscriptions t ci _ =
+    Sub.readTCP
+        t
+        ci
+        (1 :: Int)
+        numToRead
+        mkMsg
+        (TCPError t ci)
 
     where
         numToRead :: ByteString -> Int
