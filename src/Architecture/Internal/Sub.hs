@@ -31,7 +31,12 @@ import Control.Concurrent.STM
     , readTVar
     , writeTVar
     )
-import Control.Concurrent.MVar (MVar, takeMVar, putMVar, newEmptyMVar)
+import Control.Concurrent.MVar
+    ( MVar
+    , takeMVar
+    , putMVar
+    , newEmptyMVar
+    )
 import Control.Exception.Safe (catchIO, onException)
 
 import Network.KRPC.Types (CompactInfo)
@@ -290,19 +295,21 @@ tcpClientConsume
     -> IO ()
 tcpClientConsume cfg istate _ _ failmsg Nothing =
     updateOnFailure istate cfg failmsg
+
 tcpClientConsume cfg istate tfns key _ (Just bytes) = do
     now <- getPOSIXTime
-
     (_, th) <- readTVarIO tfns
 
     cmd <- atomically $ do
         model <- readTVar tmodel
-
         let (model2, cmd) = (update cfg) (th (Received bytes now)) model
 
         writeTVar tmodel model2
 
-        updateOwnHandler key (TCPClientHandler tfns) ((subscriptions cfg) model2)
+        updateOwnHandler
+            key
+            (TCPClientHandler tfns)
+            ((subscriptions cfg) model2)
 
         return cmd
 
@@ -412,7 +419,7 @@ killableProducerConsumer ioproduce ioconsume = do
             putMVar msgs (Just mval)
 
             case mval of
-                Just _ -> loop
+                Just _ -> takeMVar msgs >> loop
                 Nothing -> putMVar msgs Nothing
 
     loop `onException` putMVar msgs Nothing
@@ -423,4 +430,4 @@ consumer consume mvar = do
     mx <- takeMVar mvar
     case mx of
         Nothing -> return ()
-        Just x -> consume x >> consumer consume mvar
+        Just x -> consume x >> putMVar mvar Nothing >> consumer consume mvar
