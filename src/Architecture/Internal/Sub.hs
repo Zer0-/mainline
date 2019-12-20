@@ -182,7 +182,7 @@ updateHandlers rs tsubs =
 writeHdlr :: SubHandler msg -> TSub msg -> STM ()
 writeHdlr (TCPClientHandler tv) (TCPClient _ _ _ getMore h _) =
     writeTVar tv (getMore, h)
-writeHdlr (UDPHandler tv) (UDP _ h) = writeTVar tv h
+writeHdlr (UDPHandler tv) (UDP _ h _) = writeTVar tv h
 writeHdlr (TimerHandler tv) (Timer _ h) = writeTVar tv h
 writeHdlr _ _ = undefined
 
@@ -205,13 +205,13 @@ subscribe
     -> Maybe (SocketMood msg schemas)
     -> TSub msg
     -> IO (Maybe (SocketMood msg schemas), Maybe (SubHandler msg, ThreadId))
-subscribe cfg istate key msocket (UDP p h) = do
+subscribe cfg istate key msocket (UDP p h failmsg) = do
     th <- atomically (newTVar h)
     sock <- getsock
     threadId <- forkIO $
         killableProducerConsumer
             (udpProduce sock)
-            (udpConsume cfg istate key th)
+            (udpConsume cfg istate key th failmsg)
     return (Just $ HaveSocket sock, Just (UDPHandler th, threadId))
 
     where
@@ -319,17 +319,21 @@ tcpClientConsume cfg istate tfns key _ (Just bytes) = do
         tmodel = fst (init cfg)
 
 udpProduce :: Socket -> IO (Maybe (BS.ByteString, SockAddr))
-udpProduce sock = recvFrom sock maxline >>= return . Just
+udpProduce sock =
+    catchIO
+        (recvFrom sock maxline >>= return . Just)
+        (\_ -> return Nothing)
 
 udpConsume
     :: Program model msg schemas
     -> InternalState msg schemas
     -> Int
     -> TVar (CompactInfo -> Received -> msg)
+    -> msg
     -> Maybe (BS.ByteString, SockAddr)
     -> IO ()
-udpConsume _ _ _ _ Nothing = undefined
-udpConsume cfg istate key tth (Just (bs, sockAddr)) = do
+udpConsume cfg istate _ _ failmsg Nothing = updateOnFailure istate cfg failmsg
+udpConsume cfg istate key tth _ (Just (bs, sockAddr)) = do
     now <- getPOSIXTime
 
     cmd <- atomically $ do
@@ -391,7 +395,7 @@ closeSocketMood (WantBoth _) = return ()
 
 mapTSub :: (msg0 -> msg1) -> TSub msg0 -> TSub msg1
 mapTSub f (TCPClient t ci fkey g h e) = TCPClient t ci fkey g (f . h) (f e)
-mapTSub f (UDP p h)                   = UDP p (\ci -> f . (h ci))
+mapTSub f (UDP p h e)                 = UDP p (\ci -> f . (h ci)) (f e)
 mapTSub f (Timer ms h)                = Timer ms (f . h)
 
 
@@ -417,10 +421,7 @@ killableProducerConsumer ioproduce ioconsume = do
     let loop = do
             mval <- ioproduce
             putMVar msgs (Just mval)
-
-            case mval of
-                Just _ -> takeMVar msgs >> loop
-                Nothing -> putMVar msgs Nothing
+            takeMVar msgs >> loop
 
     loop `onException` putMVar msgs Nothing
 

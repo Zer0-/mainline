@@ -63,7 +63,7 @@ subscriptions :: Model -> Sub Msg
 subscriptions n
     | n > 3 = Sub.none
     | otherwise = Sub.batch
-        [ Sub.udp 51411 (const Got)
+        [ Sub.udp 51411 (const Got) (error "udp error")
         , Sub.timer 10000 Timeout
         ]
 

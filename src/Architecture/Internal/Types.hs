@@ -55,14 +55,14 @@ newtype Cmd msg schemas = Cmd [ TCmd msg schemas ]
 data TSub msg
     = forall t u. (Hashable t, Hashable u) =>
         TCPClient t CompactInfo u (BS.ByteString -> Int) (Received -> msg) msg
-    | UDP Port (CompactInfo -> Received -> msg)
+    | UDP Port (CompactInfo -> Received -> msg) msg
     | Timer Int (POSIXTime -> msg) -- timeout in milliseconds
 
 
 instance Hashable (TSub msg) where
     hashWithSalt s (TCPClient t ci _ _ _ _) =
         s `hashWithSalt` (1 :: Int) `hashWithSalt` t `hashWithSalt` ci
-    hashWithSalt s (UDP p _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` p
+    hashWithSalt s (UDP p _ _) = s `hashWithSalt` (2 :: Int) `hashWithSalt` p
     hashWithSalt s (Timer t _) = s `hashWithSalt` (3 :: Int) `hashWithSalt` t
 
 

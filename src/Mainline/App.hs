@@ -71,6 +71,7 @@ data MMsg
     | DBSetScoreFail
     | DBSaveOK Integer
     | DBSaveFail Integer
+    | UDPFail
 
 main :: IO ()
 main = SQL.runSetup >> dbApp init update subscriptions SQL.connstr
@@ -98,7 +99,7 @@ subscriptions mm
     | isUn (mainms ! 0) = trace "nothing to sub" Sub.none
     | otherwise = Sub.batch $
         (Sub.up RMsg $ Sub.batch rsubs) :
-        [ Sub.udp M.servePort (\ci r -> MMsg $ M.parseReceivedBytes ci r)
+        [ Sub.udp M.servePort (\ci r -> MMsg $ M.parseReceivedBytes ci r) UDPFail
         , Sub.timer 800 ProcessQueue
         , Sub.timer (60 * 1000) (\t -> MMsg $ M.TimeoutTransactions t)
         , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ M.MaintainPeers t)
@@ -381,7 +382,7 @@ update (RMsg (R.Have now infohash infodict)) model =
         , haves = insert infohash (now, 1) (haves model)
         , models = newmdls
         }
-    , insertdb
+    , Cmd.batch [logmsg, insertdb]
     )
 
     where
@@ -427,6 +428,10 @@ update (RMsg (R.Have now infohash infodict)) model =
 
         ms = models model
 
+        logmsg = Cmd.log Cmd.INFO
+            [ "Calling database to save"
+            , show $ hexify $ octToByteString infohash
+            ]
 
 update (RMsg (R.TCPError infohash ci)) model =
     ( model { metadls = newdls }
@@ -455,15 +460,14 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
         (newdls, cmds) = case mdl of
             Just (sharedmodel, rmodelm, idx) ->
                 let
-                    rmodel2m = Map.lookup ci rmodelm
-
-                    (newmodel, cmds1) = case rmodel2m of
+                    (newmodel, cmds1) = case Map.lookup ci rmodelm of
                         Just rmodel2 -> updateRModel sharedmodel rmodel2
                         Nothing ->
                             ( R.Off
                             , Cmd.log Cmd.WARNING
                                 [ "CompactInfo for RMsg not in our state."
                                 , "This shouldn't happen." ]
+                            -- This does happen sometimes. How do we get here?
                             )
 
                     newmodelm = case newmodel of
@@ -536,6 +540,10 @@ update (DBSaveFail infohash) model = (model, logmsg)
             [ "FAILED to save info to database:"
             , show $ hexify $ octToByteString infohash
             ]
+
+update UDPFail model = (model, logmsg)
+    where
+        logmsg = Cmd.log Cmd.WARNING [ "Error occurred while reading UDP" ]
 
 queryToIndex :: Message -> Model -> Int
 queryToIndex

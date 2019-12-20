@@ -31,8 +31,8 @@ readTCP :: (Hashable t, Hashable u)
         -> Sub msg
 readTCP t ci fkey g h e = Sub [ TCPClient t ci fkey g h e ]
 
-udp :: Port -> (CompactInfo -> Received -> msg) -> Sub msg
-udp port h = Sub [ UDP port h ]
+udp :: Port -> (CompactInfo -> Received -> msg) -> msg -> Sub msg
+udp port h e = Sub [ UDP port h e ]
 
 timer :: Int -> (POSIXTime -> msg) -> Sub msg
 timer dt h = Sub [ Timer dt h ]

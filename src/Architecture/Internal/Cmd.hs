@@ -460,7 +460,7 @@ batch cmds = Cmd $ concat [t | (Cmd t) <- cmds]
 
 
 getKey :: TCmd msg schemas -> Int
-getKey (CmdSendUDP srcPort _ _ _) = hash $ UDP srcPort undefined
+getKey (CmdSendUDP srcPort _ _ _) = hash $ UDP srcPort undefined undefined
 getKey (CmdSendTCP t ci _ _)      = hash $ TCPClient t ci (0 :: Int) undefined undefined undefined
 getKey _                          = undefined
 
