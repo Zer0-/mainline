@@ -285,6 +285,7 @@ tcpClientProduce tfns sock = do
                 if BS.length bs == 0 then return Nothing
                 else more s f (msg <> bs)
 
+
 tcpClientConsume
     :: Program model msg schemas
     -> InternalState msg schemas

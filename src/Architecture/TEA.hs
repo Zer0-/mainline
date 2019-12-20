@@ -68,7 +68,7 @@ loop self cfg = do
 
                             self3 <- updateWriters x self2 cfg
 
-                            _ <- runCmds self3 (cfg
+                            runCmds self3 (cfg
                                 { init = (\(tm, _) -> (tm, Cmd xs)) (init cfg) })
 
                             return self3
@@ -91,7 +91,7 @@ loop self cfg = do
 
                             let self2 = putsocketm key (HaveSocket s)
                             self3 <- updateWriters x self2 cfg
-                            _ <- runCmds self3 (cfg
+                            runCmds self3 (cfg
                                 { init = (\(tm, _) -> (tm, Cmd xs)) (init cfg) })
 
                             updateSubscriptions
@@ -119,7 +119,7 @@ loop self cfg = do
 
 run2 :: InternalState msg schemas -> Program model msg schemas -> IO ()
 run2 self cfg = do
-    _ <- runCmds self cfg
+    runCmds self cfg
 
     model <- readTVarIO $ fst $ init cfg
 
