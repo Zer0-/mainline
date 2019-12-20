@@ -71,7 +71,6 @@ data MMsg
     | DBSetScoreFail
     | DBSaveOK Integer
     | DBSaveFail Integer
-    | UDPFail
 
 main :: IO ()
 main = SQL.runSetup >> dbApp init update subscriptions SQL.connstr
@@ -98,8 +97,11 @@ subscriptions mm
     | indices mainms == [] = trace "this should never happen" Sub.none
     | isUn (mainms ! 0) = trace "nothing to sub" Sub.none
     | otherwise = Sub.batch $
-        (Sub.up RMsg $ Sub.batch rsubs) :
-        [ Sub.udp M.servePort (\ci r -> MMsg $ M.parseReceivedBytes ci r) UDPFail
+        [Sub.up RMsg $ Sub.batch rsubs
+        , Sub.udp
+            M.servePort
+            (\ci r -> MMsg $ M.parseReceivedBytes ci r)
+            (MMsg M.UDPError)
         , Sub.timer 800 ProcessQueue
         , Sub.timer (60 * 1000) (\t -> MMsg $ M.TimeoutTransactions t)
         , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ M.MaintainPeers t)
@@ -540,10 +542,6 @@ update (DBSaveFail infohash) model = (model, logmsg)
             [ "FAILED to save info to database:"
             , show $ hexify $ octToByteString infohash
             ]
-
-update UDPFail model = (model, logmsg)
-    where
-        logmsg = Cmd.log Cmd.WARNING [ "Error occurred while reading UDP" ]
 
 queryToIndex :: Message -> Model -> Int
 queryToIndex
