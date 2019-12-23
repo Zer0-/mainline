@@ -34,7 +34,11 @@ let
           test-framework test-framework-hunit test-framework-quickcheck2
           cabal-install network-transport hex
         ];
-        license = stdenv.lib.licenses.gpl2;
+        license = {
+          fullName = "Server Side Public License";
+          url = https://www.mongodb.com/licensing/server-side-public-license;
+          free = true;
+        };
       };
 
   haskellPackages = if compiler == "default"
