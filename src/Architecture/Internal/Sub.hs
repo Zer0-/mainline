@@ -85,7 +85,7 @@ updateSubscriptions (Sub tsubs) cfg istate = do
             ((flip writeTVar) True)
             ( map
                 (\(_, x, _) -> x)
-                (Map.elems (ws `Map.restrictKeys` (Map.keysSet unloads)))
+                (Map.elems (ws `Map.withoutKeys` unloadsKeys))
             )
 
         return ws
@@ -123,8 +123,9 @@ updateSubscriptions (Sub tsubs) cfg istate = do
 
         socks = sockets istate
 
+        unloadsKeys = Set.fromList (map fst tsubpairs)
         unloads =
-            currentReads `Map.withoutKeys` (Set.fromList (map fst tsubpairs))
+            currentReads `Map.withoutKeys` unloadsKeys
 
         fullClosed writeS = Set.difference
             (Map.keysSet unloads)
