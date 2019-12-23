@@ -121,12 +121,18 @@ update
         case (liftA2 (,)) msize mExtmMsgId of
             Nothing -> (Off, errmsg)
             Just (size, msgid) ->
-                ( Downloading size msgid 0 Map.empty
-                , Cmd.batch [ logmsg, pieceReq msgid firstBlk t ci ]
-                )
+                if size < 1 then (Off, errmsg2)
+                else
+                    ( Downloading size msgid 0 Map.empty
+                    , Cmd.batch [ logmsg, pieceReq msgid firstBlk t ci ]
+                    )
         where
             errmsg = Cmd.log Cmd.DEBUG
                 [ "Could not get size from handshake response." ]
+
+            errmsg = Cmd.log Cmd.INFO
+                [ "Not starting info download for"
+                , show t, "- size from extended handshake is zero." ]
 
             logmsg = Cmd.log Cmd.DEBUG
                 [ "Have extended handshake from", show ci
@@ -232,7 +238,7 @@ update
 update (GotHandshake _ _ have) _ = (Off, logmsg)
     where
         logmsg = Cmd.log
-            Cmd.WARNING
+            Cmd.DEBUG
             [ "Got unknown response from server:"
             , show have
             ]
