@@ -20,11 +20,12 @@ import Network.Socket
     , bind
     --, listen
     , connect
+    , close
     , hostAddressToTuple
     , tupleToHostAddress
     )
 import Control.Concurrent.STM (TQueue, atomically, writeTQueue)
-import Control.Exception.Safe (catchIO)
+import Control.Exception.Safe (catchIO, onException)
 
 import Network.KRPC.Types (Port, CompactInfo (CompactInfo))
 import Network.Octets (fromOctets, octets)
@@ -37,7 +38,7 @@ bindSocket :: SocketType -> Port -> IO Socket
 bindSocket t p = do
     addr:_ <- getAddrInfo (Just hints) Nothing (Just $ show p)
     sock <- socket AF_INET t defaultProtocol
-    bind sock (addrAddress addr)
+    bind sock (addrAddress addr) `onException` close sock
     return sock
 
     where
@@ -78,7 +79,7 @@ ciToAddr (CompactInfo ip p) = SockAddrInet
 connectTCP :: CompactInfo -> IO Socket
 connectTCP ci = do
     sock <- socket AF_INET Stream defaultProtocol
-    connect sock (ciToAddr ci)
+    connect sock (ciToAddr ci) `onException` close sock
     return sock
 
 
