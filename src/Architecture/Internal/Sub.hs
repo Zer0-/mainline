@@ -34,6 +34,7 @@ import Control.Concurrent.STM
 import Control.Concurrent.MVar
     ( MVar
     , takeMVar
+    , readMVar
     , putMVar
     , newEmptyMVar
     )
@@ -212,6 +213,7 @@ subscribe cfg istate key msocket (UDP p h failmsg) = do
         killableProducerConsumer
             (udpProduce sock)
             (udpConsume cfg istate key th failmsg)
+
     return (Just $ HaveSocket sock, Just (UDPHandler th, threadId))
 
     where
@@ -421,15 +423,17 @@ killableProducerConsumer ioproduce ioconsume = do
 
     let loop = do
             mval <- ioproduce
-            putMVar msgs (Just mval)
-            takeMVar msgs >> loop
+            putMVar msgs (Just (Just mval))
+            putMVar msgs (Just Nothing)
+            loop
 
     loop `onException` putMVar msgs Nothing
 
 
-consumer :: (Maybe a -> IO ()) -> MVar (Maybe (Maybe a)) -> IO ()
+consumer :: (Maybe a -> IO ()) -> MVar (Maybe (Maybe (Maybe a))) -> IO ()
 consumer consume mvar = do
-    mx <- takeMVar mvar
+    mx <- readMVar mvar
     case mx of
         Nothing -> return ()
-        Just x -> consume x >> putMVar mvar Nothing >> consumer consume mvar
+        Just (Just x) -> consume x >> takeMVar mvar >> takeMVar mvar >>= maybe (return ()) (\_ -> consumer consume mvar)
+        Just _ -> error "consoomer"
