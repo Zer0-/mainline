@@ -366,7 +366,7 @@ update
                 (\t -> if (compactInfo $ recipient t) == client then
                         Cmd.none
                     else
-                        Cmd.log Cmd.INFO
+                        Cmd.log Cmd.DEBUG
                         [ "Client mismatch with state. Expected client "
                         , show $ recipient t
                         , " but received message from "

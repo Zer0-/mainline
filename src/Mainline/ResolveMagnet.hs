@@ -125,7 +125,7 @@ update
                 , Cmd.batch [ logmsg, pieceReq msgid firstBlk t ci ]
                 )
         where
-            errmsg = Cmd.log Cmd.WARNING
+            errmsg = Cmd.log Cmd.DEBUG
                 [ "Could not get size from handshake response." ]
 
             logmsg = Cmd.log Cmd.DEBUG
@@ -191,7 +191,7 @@ update
                         ]
                 Right infodict ->
                     Cmd.batch
-                    [ Cmd.log Cmd.INFO
+                    [ Cmd.log Cmd.DEBUG
                         [ prettyIH
                         , "info successfully downloaded"
                         ]
@@ -207,8 +207,7 @@ update
                                 , "calculated:", hexify calculated
                                 , "expected:", hexify expected
                                 ]
-                            else Cmd.none
-                    , Cmd.bounce $ Have now t infodict
+                            else Cmd.bounce $ Have now t infodict
                     ]
 
             prettyIH = show $ hexify $ octToByteString t
@@ -240,7 +239,7 @@ update (GotHandshake _ _ have) _ = (Off, logmsg)
 
 update _ Off = (Off, Cmd.none)
 update (DownloadInfo _ _ _) _ = (Off, Cmd.none)
-update (Got _ _ _ _ msg) _      = (Off, Cmd.log Cmd.INFO
+update (Got _ _ _ _ msg) _      = (Off, Cmd.log Cmd.DEBUG
     [ "Received unexpected message having never shook hands:", show msg ])
 
 

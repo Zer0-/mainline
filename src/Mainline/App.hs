@@ -384,7 +384,9 @@ update (RMsg (R.Have now infohash infodict)) model =
         , haves = insert infohash (now, 1) (haves model)
         , models = newmdls
         }
-    , Cmd.batch [logmsg, insertdb]
+    , case filetups of
+        [] -> errmsg
+        _ -> Cmd.batch [logmsg, insertdb]
     )
 
     where
@@ -398,7 +400,9 @@ update (RMsg (R.Have now infohash infodict)) model =
             (getName layoutInfo)
             (calculateScore 1 now)
             (unHashList $ piPieceHashes pieceInfo)
-            (getFileTups layoutInfo)
+            filetups
+
+        filetups = getFileTups layoutInfo
 
         pieceInfo = idPieceInfo infodict
 
@@ -435,6 +439,12 @@ update (RMsg (R.Have now infohash infodict)) model =
             , show $ hexify $ octToByteString infohash
             ]
 
+        errmsg = Cmd.log Cmd.WARNING
+            [ "meta info"
+            , show $ hexify $ octToByteString infohash
+            , "has an empty file list! Not saving to database."
+            ]
+
 update (RMsg (R.TCPError infohash ci)) model =
     ( model { metadls = newdls }
     , Cmd.log Cmd.DEBUG [ "Download of ", show infohash
@@ -466,10 +476,8 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
                         Just rmodel2 -> updateRModel sharedmodel rmodel2
                         Nothing ->
                             ( R.Off
-                            , Cmd.log Cmd.WARNING
-                                [ "CompactInfo for RMsg not in our state."
-                                , "This shouldn't happen." ]
-                            -- This does happen sometimes. How do we get here?
+                            , Cmd.log Cmd.DEBUG
+                                [ "CompactInfo for RMsg not in our state." ]
                             )
 
                     newmodelm = case newmodel of
