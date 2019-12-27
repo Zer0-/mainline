@@ -96,12 +96,15 @@ updateSubscriptions (Sub tsubs) cfg istate = do
 
     let
         toClose = Set.filter
-            ((\case
-                WantWrites _  -> False
-                WantReads _ _ -> True
-                WantBoth _    -> False
-                HaveSocket _  -> True
-            ) . ((Map.!) socks))
+            (( maybe
+                False
+                (\case
+                    WantWrites _  -> False
+                    WantReads _ _ -> True
+                    WantBoth _    -> False
+                    HaveSocket _  -> True
+                )
+            ) . ((flip Map.lookup) socks))
             (fullClosed writeS)
 
     -- should the SocketMood WantBoth be changed to WantWrites if it's in fullClosed?

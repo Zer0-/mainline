@@ -130,7 +130,7 @@ update
             errmsg = Cmd.log Cmd.DEBUG
                 [ "Could not get size from handshake response." ]
 
-            errmsg = Cmd.log Cmd.INFO
+            errmsg2 = Cmd.log Cmd.INFO
                 [ "Not starting info download for"
                 , show t, "- size from extended handshake is zero." ]
 

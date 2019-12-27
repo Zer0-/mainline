@@ -69,7 +69,8 @@ executable Mainline
                    hex,
                    data-default,
                    bittorrent,
-                   safe-exceptions
+                   safe-exceptions,
+                   unagi-chan
   other-modules:
                    Architecture.Cmd
                    Architecture.Internal.Cmd
@@ -83,6 +84,7 @@ executable Mainline
                    Mainline.ResolveMagnet
                    Mainline.RoutingTable
                    Mainline.SQL
+                   Mainline.Prepopulate
                    Network.KRPC
                    Network.KRPC.Helpers
                    Network.KRPC.InternalConstants
@@ -111,7 +113,8 @@ executable SendUDPHello
                    random,
                    stm,
                    bytestring,
-                   safe-exceptions
+                   safe-exceptions,
+                   unagi-chan
   other-modules:
                    Architecture.Cmd
                    Architecture.Sub
@@ -146,7 +149,8 @@ executable Teatime
                    random,
                    stm,
                    hashable,
-                   safe-exceptions
+                   safe-exceptions,
+                   unagi-chan
   other-modules:
                    Architecture.Cmd
                    Architecture.Internal.Cmd

@@ -26,9 +26,9 @@ import qualified Data.Map             as Map
 import Data.Map                       (Map)
 import qualified Data.Set             as Set
 import Data.Set                      (fromAscList, filter, Set)
-import Data.Word                     (Word32)
 import Data.BEncode                  (encode, decode)
 import Data.Time.Clock.POSIX         (POSIXTime)
+import Data.Array                    (Array, (!), indices)
 
 --import Architecture.TEA              (Config (..), run)
 -- import Architecture.Cmd              (Cmd)
@@ -38,11 +38,7 @@ import qualified Architecture.Cmd as Cmd
 import Architecture.Sub              (Received (..))
 import Network.KRPC                  (KPacket (..), scanner)
 import Network.KRPC.Helpers          (stringpack)
-import Network.Octets
- ( Octets (..)
- , fromByteString
- , octToByteString
- )
+import Network.Octets (fromByteString)
 import Mainline.RoutingTable
     ( initRoutingTable
     , RoutingTable
@@ -75,18 +71,6 @@ type Cmd msg = Cmd.Cmd msg Schemas
 servePort :: Port
 servePort = 51416
 
-seedNodePort :: Port
-seedNodePort = 51413
---seedNodePort = 6881
-
-seedNodeHost :: Word32
-seedNodeHost = fromOctets [ 192, 168, 4, 2 ]
---seedNodeHost = fromOctets [ 82, 221, 103, 244 ]
---seedNodeHost = fromOctets [ 67, 215, 246, 10 ]
-
-seedNodeInfo :: CompactInfo
-seedNodeInfo = CompactInfo seedNodeHost seedNodePort
-
 tidsize :: Int
 tidsize = 4
 
@@ -99,7 +83,7 @@ responseTimeout = 120
 {- Data Structures -}
 
 data Model
-    = Uninitialized Int
+    = Uninitialized Int (Array Int CompactInfo)
     | Uninitialized1 ServerConfig ByteString
     | Ready ServerState
 
@@ -131,6 +115,7 @@ data Msg
     | TimeoutTransactions POSIXTime
     | MaintainPeers POSIXTime
     | PeersFoundResult Int NodeID InfoHash [CompactInfo]
+    | NodeAdded CompactInfo
     | UDPError
 
 data ServerState = ServerState
@@ -143,8 +128,8 @@ data ServerState = ServerState
 data ServerConfig = ServerConfig
     { index      :: Int
     , listenPort :: Port
-    , seedNode   :: CompactInfo
     , ourId      :: NodeID
+    , seedNodes  :: Array Int CompactInfo
     }
 
 data TransactionState = TransactionState
@@ -179,20 +164,24 @@ update :: Msg -> Model -> (Model, Cmd Msg)
 -- Error Parsing
 update (ErrorParsing ci bs err) m =
     case m of
-        Uninitialized _ -> (m, logParsingErr ci bs err)
+        Uninitialized _ _ -> (m, logParsingErr ci bs err)
         (Uninitialized1 c _) -> (m, onParsingErr (listenPort c) ci bs err)
         Ready state -> (m, onParsingErr (listenPort $ conf state) ci bs err)
 
 -- Get new node id. Init server state, request tid for pinging seed node
-update (NewNodeId _ bs) (Uninitialized ix) = (Uninitialized ix, initialCmds)
+update (NewNodeId _ bs) (Uninitialized ix ss) =
+    (Uninitialized ix ss, initialCmds)
     where
         initialCmds = Cmd.batch [ logmsg, pingSeed ]
+
+        seedsIx = fromInteger $ ((fromByteString bs) :: Integer)
+            `mod` fromIntegral (length $ indices ss)
 
         pingSeed = Cmd.randomBytes
             tidsize
             (\t -> SendFirstMessage
                 { idx           = ix
-                , sendRecipient = seedNodeInfo
+                , sendRecipient = ss ! seedsIx
                 , body          = (Query ourid Ping)
                 , newtid        = t
                 , newNodeId     = ourid
@@ -201,7 +190,7 @@ update (NewNodeId _ bs) (Uninitialized ix) = (Uninitialized ix, initialCmds)
 
         ourid = (fromByteString bs)
 
-        logmsg = Cmd.log Cmd.DEBUG
+        logmsg = Cmd.log Cmd.INFO
             [ "Initializing with node id:"
             , show ourid
             ]
@@ -215,7 +204,7 @@ update
         , newtid
         , newNodeId
         }
-    (Uninitialized _) =
+    (Uninitialized _ ss) =
         ( Uninitialized1 conf newtid
         , Cmd.batch [ logmsg, sendCmd ]
         )
@@ -224,8 +213,8 @@ update
             conf = ServerConfig
                 { index = idx
                 , listenPort = servePort
-                , seedNode = seedNodeInfo
                 , ourId = newNodeId
+                , seedNodes = ss
                 }
 
             logmsg = Cmd.log Cmd.DEBUG
@@ -445,8 +434,8 @@ update
                         }
                 Nothing -> state2
 
-update (Inbound _ ci kpacket) (Uninitialized ix) =
-    ((Uninitialized ix), log)
+update (Inbound _ ci kpacket) (Uninitialized ix ss) =
+    ((Uninitialized ix ss), log)
 
     where
         log = Cmd.log Cmd.DEBUG
@@ -466,9 +455,13 @@ update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
             ]
 
 update (TimeoutTransactions _) (Uninitialized1 conf _) =
-    (Uninitialized ix, Cmd.bounce $ NewNodeId ix (octToByteString (ourId conf)))
+    ( Uninitialized ix ss
+    , Cmd.randomBytes 20 $ NewNodeId ix
+    )
+
     where
         ix = index conf
+        ss = seedNodes conf
 
 update (TimeoutTransactions now) (Ready state) =
     (Ready state { transactions = newtrns, routingTable = newrt }, log)
@@ -551,6 +544,7 @@ update (MaintainPeers now) (Ready state) =
 
 update (TimeoutTransactions _) m = (m, Cmd.none)
 update (MaintainPeers _) m = (m, Cmd.none)
+update (NodeAdded _) m = (m, Cmd.none)
 
 
 -- Explicitly list undefined states
@@ -558,9 +552,9 @@ update (NewNodeId _ _)       (Uninitialized1 _ _)  = undefined
 update (NewNodeId _ _)       (Ready _)             = undefined
 update (SendFirstMessage {}) (Uninitialized1 _ _ ) = undefined
 update (SendFirstMessage {}) (Ready _)             = undefined
-update (SendMessage {})      (Uninitialized _)     = undefined
+update (SendMessage {})      (Uninitialized _ _)   = undefined
 update (SendMessage {})      (Uninitialized1 _ _)  = undefined
-update (SendResponse {})     (Uninitialized _)     = undefined
+update (SendResponse {})     (Uninitialized _ _)   = undefined
 update (SendResponse {})     (Uninitialized1 _ _)  = undefined
 update (PeersFoundResult _ _ _ _) _                = undefined
 update UDPError              _                     = undefined
@@ -724,7 +718,7 @@ handleResponse
 
             initialRt = routingTable state
 
-            cmds = Cmd.batch $ logmsg : sendCmds
+            cmds = Cmd.batch $ logmsg : bounce : sendCmds
 
             (newstate, sendCmds) =
                 foldl
@@ -734,6 +728,8 @@ handleResponse
                     )
                     (state { routingTable = rt }, [])
                     (filter filterNodes (fromAscList ninfos))
+
+            bounce = Cmd.bounce $ NodeAdded (compactInfo node)
 
 
 -- Respond first GetPeers Nodes Response

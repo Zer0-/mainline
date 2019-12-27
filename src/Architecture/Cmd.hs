@@ -15,6 +15,7 @@ module Architecture.Cmd
     , db
     , up
     , bounce
+    , writeChan
     ) where
 
 import Prelude hiding (log, print, readFile, writeFile)
@@ -23,6 +24,7 @@ import Data.Hashable (Hashable)
 import Data.ByteString (ByteString)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Squeal.PostgreSQL (PQ)
+import Control.Concurrent.Chan.Unagi (InChan)
 
 import Architecture.Internal.Cmd (batch, mapTCmd)
 
@@ -38,7 +40,7 @@ import Architecture.Internal.Types
 
 -- TODO: use a config
 minLoglvl :: Int
-minLoglvl = fromEnum DEBUG
+minLoglvl = fromEnum INFO
 
 
 getRandom :: (Float -> msg) -> Cmd msg schemas
@@ -98,3 +100,6 @@ up f (Cmd xs) = Cmd $ map (mapTCmd f) xs
 
 bounce :: msg -> Cmd msg schemas
 bounce m = Cmd [ CmdBounce m ]
+
+writeChan :: InChan a -> a -> Cmd msg schemas
+writeChan c x = Cmd [ CmdWriteChan c x ]

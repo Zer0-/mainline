@@ -27,6 +27,7 @@ import Control.Concurrent.STM (TVar, TMVar, TQueue)
 import Squeal.PostgreSQL (Connection)
 import Squeal.PostgreSQL (Pool, PQ)
 import Generics.SOP (K (..))
+import Control.Concurrent.Chan.Unagi (InChan)
 
 import Network.KRPC.Types (Port, CompactInfo)
 
@@ -45,6 +46,7 @@ data TCmd msg schemas
             (PQ schemas schemas IO result)
             (Either msg (Maybe result -> msg))
     | CmdBounce msg
+    | forall a. CmdWriteChan (InChan a) a
     | SocketResult Int (Maybe Socket)
     | QuitW Int
 

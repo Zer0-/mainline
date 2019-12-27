@@ -52,6 +52,7 @@ import Squeal.PostgreSQL
     , SquealException
     )
 import Generics.SOP (K (..))
+import Control.Concurrent.Chan.Unagi (writeChan)
 
 import Network.KRPC.Types (CompactInfo (CompactInfo))
 import Architecture.Internal.Network
@@ -113,6 +114,8 @@ execTCmd _ _ _ (CmdSendUDP _ (CompactInfo ip 0) _ failmsg) = do
     where
         msg = "Error: Cannot send message to " ++ show (CompactInfo ip 0)
             ++ ". Invalid port 0!"
+
+execTCmd _ _ _ (CmdWriteChan c x) = writeChan c x >> return Nothing
 
 execTCmd _ _ (Just pool) (CmdDatabase session (Right handler)) =
     catch
@@ -464,5 +467,6 @@ mapTCmd _ (CmdWriteFile p bs)           = CmdWriteFile p bs
 mapTCmd f (CmdDatabase sesh (Right h))  = CmdDatabase sesh (Right $ f . h)
 mapTCmd f (CmdDatabase sesh (Left err)) = CmdDatabase sesh (Left $ f err)
 mapTCmd f (CmdBounce m)                 = CmdBounce (f m)
+mapTCmd _ (CmdWriteChan c x)            = CmdWriteChan c x
 mapTCmd _ (SocketResult i ms)           = SocketResult i ms
 mapTCmd _ (QuitW i)                     = QuitW i

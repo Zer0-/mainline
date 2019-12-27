@@ -4,7 +4,7 @@ import Prelude hiding (init, lookup)
 import Data.Maybe (isJust)
 import Data.Int (Int32)
 import qualified Data.Map as Map
-import Data.Array (Array, listArray, indices, (!), (//), assocs)
+import Data.Array (Array, listArray, (!), (//), assocs)
 import Data.List (sortBy, foldl')
 import Data.Bits (xor)
 import Data.Function (on)
@@ -13,6 +13,14 @@ import Data.Cache.LRU (LRU, newLRU, lookup, insert)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (hashWithSalt, hash)
 import Data.ByteString (ByteString)
+
+import Data.Torrent
+    ( InfoDict (..)
+    , FileInfo (..)
+    , HashList (..)
+    , PieceInfo (..)
+    , LayoutInfo (..)
+    )
 
 import qualified Architecture.Cmd as Cmd
 import Architecture.TEA (dbApp)
@@ -33,23 +41,16 @@ import Network.Octets (octToByteString)
 import Mainline.RoutingTable (RoutingTable (..), nclosest)
 import qualified Mainline.ResolveMagnet as R
 import qualified Mainline.SQL as SQL
-
-import Data.Torrent
-    ( InfoDict (..)
-    , FileInfo (..)
-    , HashList (..)
-    , PieceInfo (..)
-    , LayoutInfo (..)
-    )
+import qualified Mainline.Prepopulate as Prepopulate
 
 import Debug.Trace (trace)
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 200
+nMplex = 1000
 
 msBetweenCallsToNode :: Int
-msBetweenCallsToNode = 1500
+msBetweenCallsToNode = 1000
 
 scoreAggregateSeconds :: Int
 scoreAggregateSeconds = 60
@@ -73,13 +74,20 @@ data MMsg
     | DBSaveFail Integer
 
 main :: IO ()
-main = SQL.runSetup >> dbApp init update subscriptions SQL.connstr
+main = do
+    seeds <- Prepopulate.main
+    SQL.runSetup
+    dbApp (init $ seedNodes seeds) update subscriptions SQL.connstr
 
-init :: (Model, Cmd MMsg)
-init =
+    where
+        seedNodes seeds = listArray (0, length seeds - 1) seeds
+
+init :: Array Int CompactInfo -> (Model, Cmd MMsg)
+init ss =
     ( Model
-        { models =
-            listArray (0, nMplex - 1) [M.Uninitialized i | i <- [0..nMplex]]
+        { models = listArray
+            (0, nMplex - 1)
+            [M.Uninitialized i ss | i <- [0..nMplex-1]]
         , tcache = newLRU (Just $ fromIntegral $ nMplex * 10)
         , haves = newLRU (Just $ fromIntegral $ nMplex * 10)
         , queue = []
@@ -93,32 +101,23 @@ init =
 
 
 subscriptions :: Model -> Sub MMsg
-subscriptions mm
-    | indices mainms == [] = trace "this should never happen" Sub.none
-    | isUn (mainms ! 0) = trace "nothing to sub" Sub.none
-    | otherwise = Sub.batch $
-        [Sub.up RMsg $ Sub.batch rsubs
-        , Sub.udp
-            M.servePort
-            (\ci r -> MMsg $ M.parseReceivedBytes ci r)
-            (MMsg M.UDPError)
-        , Sub.timer 800 ProcessQueue
-        , Sub.timer (60 * 1000) (\t -> MMsg $ M.TimeoutTransactions t)
-        , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ M.MaintainPeers t)
-        ]
+subscriptions mm = Sub.batch $
+    [Sub.up RMsg $ Sub.batch rsubs
+    , Sub.udp
+        M.servePort
+        (\ci r -> MMsg $ M.parseReceivedBytes ci r)
+        (MMsg M.UDPError)
+    , Sub.timer 1000 ProcessQueue
+    , Sub.timer (60 * 1000) (\t -> MMsg $ M.TimeoutTransactions t)
+    , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ M.MaintainPeers t)
+    ]
 
-        where
-            mainms = models mm
+    where
+        rsubs :: [ Sub R.Msg ]
+        rsubs = map (\(ih, (ci, mdl)) -> R.subscriptions ih ci mdl) rmodels
 
-            isUn :: M.Model -> Bool
-            isUn (M.Uninitialized _) = True
-            isUn _ = False
-
-            rsubs :: [ Sub R.Msg ]
-            rsubs = map (\(ih, (ci, mdl)) -> R.subscriptions ih ci mdl) rmodels
-
-            rmodels = Map.assocs (metadls mm)
-                >>= \(ih, (_, m, _)) -> zip (repeat ih) (Map.assocs m)
+        rmodels = Map.assocs (metadls mm)
+            >>= \(ih, (_, m, _)) -> zip (repeat ih) (Map.assocs m)
 
 
 update :: MMsg -> Model -> (Model, Cmd MMsg)
@@ -378,6 +377,8 @@ update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
 
 update (MMsg UDPError) model = (model, Cmd.log Cmd.WARNING ["UDPError"])
 
+update (MMsg (NodeAdded _)) model = (model, Cmd.none)
+
 update (RMsg (R.Have now infohash infodict)) model =
     ( model
         { metadls = Map.delete infohash (metadls model)
@@ -580,7 +581,7 @@ queryToIndex
 
         getid (M.Ready state) = M.ourId $ M.conf state
         getid (M.Uninitialized1 conf _) = M.ourId conf
-        getid (M.Uninitialized _) = -(2`e`161)
+        getid (M.Uninitialized _ _) = -(2`e`161)
 
         ms = assocs (models mm)
 
