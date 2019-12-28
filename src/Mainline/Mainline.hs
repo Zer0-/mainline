@@ -83,7 +83,7 @@ responseTimeout = 120
 {- Data Structures -}
 
 data Model
-    = Uninitialized Int (Array Int CompactInfo)
+    = Uninitialized Int (Array Int CompactInfo) Int
     | Uninitialized1 ServerConfig ByteString
     | Ready ServerState
 
@@ -130,6 +130,7 @@ data ServerConfig = ServerConfig
     , listenPort :: Port
     , ourId      :: NodeID
     , seedNodes  :: Array Int CompactInfo
+    , bucketSize :: Int
     }
 
 data TransactionState = TransactionState
@@ -164,13 +165,13 @@ update :: Msg -> Model -> (Model, Cmd Msg)
 -- Error Parsing
 update (ErrorParsing ci bs err) m =
     case m of
-        Uninitialized _ _ -> (m, logParsingErr ci bs err)
+        Uninitialized _ _ _ -> (m, logParsingErr ci bs err)
         (Uninitialized1 c _) -> (m, onParsingErr (listenPort c) ci bs err)
         Ready state -> (m, onParsingErr (listenPort $ conf state) ci bs err)
 
 -- Get new node id. Init server state, request tid for pinging seed node
-update (NewNodeId _ bs) (Uninitialized ix ss) =
-    (Uninitialized ix ss, initialCmds)
+update (NewNodeId _ bs) (Uninitialized ix ss sz) =
+    (Uninitialized ix ss sz, initialCmds)
     where
         initialCmds = Cmd.batch [ logmsg, pingSeed ]
 
@@ -204,7 +205,7 @@ update
         , newtid
         , newNodeId
         }
-    (Uninitialized _ ss) =
+    (Uninitialized _ ss sz) =
         ( Uninitialized1 conf newtid
         , Cmd.batch [ logmsg, sendCmd ]
         )
@@ -215,6 +216,7 @@ update
                 , listenPort = servePort
                 , ourId = newNodeId
                 , seedNodes = ss
+                , bucketSize = sz
                 }
 
             logmsg = Cmd.log Cmd.DEBUG
@@ -290,7 +292,7 @@ update
             model = Ready ServerState
                 { transactions = Map.empty
                 , conf         = conf
-                , routingTable = initRoutingTable ourid
+                , routingTable = initRoutingTable (bucketSize conf) ourid
                 , gettingPeers = Map.empty
                 }
 
@@ -434,8 +436,8 @@ update
                         }
                 Nothing -> state2
 
-update (Inbound _ ci kpacket) (Uninitialized ix ss) =
-    ((Uninitialized ix ss), log)
+update (Inbound _ ci kpacket) (Uninitialized ix ss sz) =
+    ((Uninitialized ix ss sz), log)
 
     where
         log = Cmd.log Cmd.DEBUG
@@ -455,13 +457,14 @@ update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
             ]
 
 update (TimeoutTransactions _) (Uninitialized1 conf _) =
-    ( Uninitialized ix ss
+    ( Uninitialized ix ss sz
     , Cmd.randomBytes 20 $ NewNodeId ix
     )
 
     where
         ix = index conf
         ss = seedNodes conf
+        sz = bucketSize conf
 
 update (TimeoutTransactions now) (Ready state) =
     (Ready state { transactions = newtrns, routingTable = newrt }, log)
@@ -552,9 +555,9 @@ update (NewNodeId _ _)       (Uninitialized1 _ _)  = undefined
 update (NewNodeId _ _)       (Ready _)             = undefined
 update (SendFirstMessage {}) (Uninitialized1 _ _ ) = undefined
 update (SendFirstMessage {}) (Ready _)             = undefined
-update (SendMessage {})      (Uninitialized _ _)   = undefined
+update (SendMessage {})      (Uninitialized _ _ _) = undefined
 update (SendMessage {})      (Uninitialized1 _ _)  = undefined
-update (SendResponse {})     (Uninitialized _ _)   = undefined
+update (SendResponse {})     (Uninitialized _ _ _) = undefined
 update (SendResponse {})     (Uninitialized1 _ _)  = undefined
 update (PeersFoundResult _ _ _ _) _                = undefined
 update UDPError              _                     = undefined

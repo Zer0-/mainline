@@ -47,7 +47,7 @@ import Debug.Trace (trace)
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 1000
+nMplex = 5000
 
 msBetweenCallsToNode :: Int
 msBetweenCallsToNode = 1000
@@ -87,7 +87,7 @@ init ss =
     ( Model
         { models = listArray
             (0, nMplex - 1)
-            [M.Uninitialized i ss | i <- [0..nMplex-1]]
+            [M.Uninitialized i ss 5 | i <- [0..nMplex-1]]
         , tcache = newLRU (Just $ fromIntegral $ nMplex * 10)
         , haves = newLRU (Just $ fromIntegral $ nMplex * 10)
         , queue = []
@@ -581,7 +581,7 @@ queryToIndex
 
         getid (M.Ready state) = M.ourId $ M.conf state
         getid (M.Uninitialized1 conf _) = M.ourId conf
-        getid (M.Uninitialized _ _) = -(2`e`161)
+        getid (M.Uninitialized _ _ _) = -(2`e`161)
 
         ms = assocs (models mm)
 
@@ -659,7 +659,7 @@ throttle cache key now ms =
         (lru, Just time) ->
             if now - time < (fromIntegral ms) / (fromIntegral (1000 :: Int))
             then Left lru
-            else Right cache2
+            else Right cache
     where
         cache2 = insert key now cache
 

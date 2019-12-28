@@ -32,8 +32,8 @@ import Mainline.Bucket
 import Network.KRPC.Types (NodeID, NodeInfo (..))
 
 --Maximum size of a bucket before it must be split
-bucketsize :: Int
-bucketsize = 8
+-- bucketsize :: Int
+-- bucketsize = 8
 
 minQDurationSeconds :: Int
 minQDurationSeconds = 15 * 60
@@ -82,8 +82,8 @@ exists :: RoutingTable -> NodeInfo -> Bool
 exists rt nodeinfo = Map.member (nodeId nodeinfo) (nodes rt)
 
 
-initRoutingTable :: NodeID -> RoutingTable
-initRoutingTable nodeid = RoutingTable bucket Map.empty
+initRoutingTable :: Int -> NodeID -> RoutingTable
+initRoutingTable bucketsize nodeid = RoutingTable bucket Map.empty
     where
         bucket = Bucket nodeid bucketsize 0 (((^) :: Integer -> Integer -> Integer) 2 160) Set.empty
 

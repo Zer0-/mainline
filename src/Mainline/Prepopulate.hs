@@ -16,7 +16,10 @@ import Network.KRPC.Types (CompactInfo (..), Port)
 import Network.Octets (Octets (..))
 
 nFind :: Int
-nFind = 100
+nFind = 1000
+
+bucketSize :: Int
+bucketSize = 64
 
 seedNodePort :: Port
 seedNodePort = 6881
@@ -42,11 +45,11 @@ data Model = Model
 init :: InChan CompactInfo -> (Model, M.Cmd M.Msg)
 init inchan = (m, Cmd.batch [logmsg, Cmd.randomBytes 20 (M.NewNodeId 0)])
     where
-        m = Model (M.Uninitialized 0 seedNodes) 0 inchan
+        m = Model (M.Uninitialized 0 seedNodes bucketSize) 0 inchan
         logmsg = Cmd.log Cmd.INFO [ "Prepopulate init" ]
 
 subscriptions :: Model -> Sub M.Msg
-subscriptions (Model { model = M.Uninitialized _ _ }) = Sub.none
+subscriptions (Model { model = M.Uninitialized _ _ _}) = Sub.none
 subscriptions (Model { model = m, count = n })
     | n > nFind = Sub.none
     | otherwise = Sub.udp (getPort m) M.parseReceivedBytes M.UDPError
@@ -57,7 +60,7 @@ subscriptions (Model { model = m, count = n })
             ( M.Ready M.ServerState
                 { M.conf = M.ServerConfig { M.listenPort = p } }
             ) = p
-        getPort (M.Uninitialized _ _) = undefined
+        getPort (M.Uninitialized _ _ _) = undefined
 
 update :: M.Msg -> Model -> (Model, M.Cmd M.Msg)
 update (M.PeersFoundResult _ _ _ _) m = (m, Cmd.none)
