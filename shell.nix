@@ -4,17 +4,16 @@ let
 
   inherit (nixpkgs) pkgs;
 
-  bittorrent = pkgs.callPackage ../sources/bittorrent/default.nix {};
+  bittorrent = pkgs.callPackage ./build_support/bittorrent.nix {};
 
-  squeal-postgresql = pkgs.callPackage ../sources/squeal/shell.nix {};
+  squeal-postgresql = pkgs.callPackage ./build_support/squeal.nix {};
 
   f = { mkDerivation, base, bencoding, bytestring, containers
       , Crypto, HUnit, network, QuickCheck, stdenv, test-framework
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
       , DRBG, text, time, cabal-install, network-transport, cpu
-      , parsec, lrucache, hex, cereal, data-default, bittorrent
-      , squeal-postgresql, llvmPackages_6
-      , safe-exceptions, unagi-chan
+      , parsec, lrucache, hex, cereal, data-default
+      , llvmPackages_6, safe-exceptions, unagi-chan
       }:
       mkDerivation {
         pname = "Mainline";
@@ -22,7 +21,6 @@ let
         src = ./.;
         isLibrary = true;
         isExecutable = true;
-        libraryHaskellDepends = [ base ];
         executableHaskellDepends = [
           base bencoding bytestring containers Crypto network crypto-api
           DRBG text time cpu parsec lrucache cereal data-default bittorrent
@@ -45,12 +43,7 @@ let
                        then pkgs.haskellPackages
                        else pkgs.haskell.packages.${compiler};
 
-  drv = haskellPackages.callPackage f
-    {
-      bittorrent = bittorrent;
-      squeal-postgresql = squeal-postgresql;
-    };
+  drv = haskellPackages.callPackage f {};
 
 in
-
   if pkgs.lib.inNixShell then drv.env else drv
