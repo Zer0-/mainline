@@ -1,5 +1,8 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
+module Mainline.App
+    (main) where
+
 import Prelude hiding (init, lookup)
 import Data.Maybe (isJust)
 import Data.Int (Int32)
@@ -35,6 +38,7 @@ import Network.KRPC.Types
     , QueryDat    (..)
     , CompactInfo (..)
     , InfoHash
+    , Port
     )
 import Network.KRPC.Helpers (hexify)
 import Network.Octets (octToByteString)
@@ -47,7 +51,7 @@ import Debug.Trace (trace)
 
 -- Number of nodes on this port
 nMplex :: Int
-nMplex = 5000
+nMplex = 500
 
 msBetweenCallsToNode :: Int
 msBetweenCallsToNode = 1000
@@ -61,6 +65,7 @@ data Model = Model
     , haves   :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
     , queue   :: [(Int, Int, M.Msg)] -- WARN: unbounded
     , metadls :: Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model, Int) -- TODO: Time these out?
+    , servePort :: Port
     }
 
 data MMsg
@@ -73,38 +78,40 @@ data MMsg
     | DBSaveOK Integer
     | DBSaveFail Integer
 
-main :: IO ()
-main = do
-    seeds <- Prepopulate.main
+main :: Port -> IO ()
+main p = do
+    seeds <- Prepopulate.main p
     SQL.runSetup
-    dbApp (init $ seedNodes seeds) update subscriptions SQL.connstr
+    dbApp (init p $ seedNodes seeds) update subscriptions SQL.connstr
 
     where
         seedNodes seeds = listArray (0, length seeds - 1) seeds
 
-init :: Array Int CompactInfo -> (Model, Cmd MMsg)
-init ss =
+init :: Port -> Array Int CompactInfo -> (Model, Cmd MMsg)
+init p ss =
     ( Model
         { models = listArray
             (0, nMplex - 1)
-            [M.Uninitialized i ss 5 | i <- [0..nMplex-1]]
+            [M.Uninitialized $ mkCfg i 5 | i <- [0..nMplex-1]]
         , tcache = newLRU (Just $ fromIntegral $ nMplex * 10)
         , haves = newLRU (Just $ fromIntegral $ nMplex * 10)
         , queue = []
         , metadls = Map.empty
+        , servePort = p
         }
     , Cmd.batch [mkCmd i | i <- [0..nMplex-1]]
     )
 
     where
         mkCmd i = Cmd.randomBytes 20 (MMsg . (NewNodeId i))
+        mkCfg ix sz = M.ServerConfig ix p undefined ss sz
 
 
 subscriptions :: Model -> Sub MMsg
 subscriptions mm = Sub.batch $
     [Sub.up RMsg $ Sub.batch rsubs
     , Sub.udp
-        M.servePort
+        (servePort mm)
         (\ci r -> MMsg $ M.parseReceivedBytes ci r)
         (MMsg M.UDPError)
     , Sub.timer 1000 ProcessQueue
@@ -123,7 +130,7 @@ subscriptions mm = Sub.batch $
 update :: MMsg -> Model -> (Model, Cmd MMsg)
 update (MMsg (NewNodeId ix bs)) m = updateExplicit (NewNodeId ix bs) m ix
 update (MMsg (ErrorParsing ci bs err)) m =
-    (m, Cmd.up MMsg $ M.onParsingErr M.servePort ci bs err)
+    (m, Cmd.up MMsg $ M.onParsingErr (servePort m) ci bs err)
 update
     ( MMsg ( Inbound t ci
         ( KPacket
@@ -274,7 +281,7 @@ update (MMsg (Inbound _ ci ( KPacket { message }))) m =
     adaptResult MMsg $ M.logErr ci message m
 
 update
-    (MMsg (SendFirstMessage {idx, sendRecipient, body, newtid, newNodeId}))
+    (MMsg (SendFirstMessage {idx, sendRecipient, body, newtid}))
     m = sendOrQueue
         (throttle (tcache m) h (fromInteger 0) msBetweenCallsToNode)
         h
@@ -284,7 +291,7 @@ update
 
     where
         h = hashci sendRecipient
-        msg = SendFirstMessage idx sendRecipient body newtid newNodeId
+        msg = SendFirstMessage idx sendRecipient body newtid
 
 update
     (MMsg (SendMessage { idx, sendAction, targetNode, body, newtid, when }))
@@ -581,7 +588,7 @@ queryToIndex
 
         getid (M.Ready state) = M.ourId $ M.conf state
         getid (M.Uninitialized1 conf _) = M.ourId conf
-        getid (M.Uninitialized _ _ _) = -(2`e`161)
+        getid (M.Uninitialized _) = -(2`e`161)
 
         ms = assocs (models mm)
 

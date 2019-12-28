@@ -9,7 +9,6 @@ module Mainline.Mainline
     , Cmd
     , update
     , parseReceivedBytes
-    , servePort
     , onParsingErr
     , logHelper
     , logErr
@@ -68,9 +67,6 @@ type Cmd msg = Cmd.Cmd msg Schemas
 
 {- Constants -}
 
-servePort :: Port
-servePort = 51416
-
 tidsize :: Int
 tidsize = 4
 
@@ -83,7 +79,7 @@ responseTimeout = 120
 {- Data Structures -}
 
 data Model
-    = Uninitialized Int (Array Int CompactInfo) Int
+    = Uninitialized ServerConfig
     | Uninitialized1 ServerConfig ByteString
     | Ready ServerState
 
@@ -96,7 +92,6 @@ data Msg
         , sendRecipient :: CompactInfo
         , body          :: Message
         , newtid        :: ByteString
-        , newNodeId     :: Integer
         }
     | SendMessage
         { idx           :: Int
@@ -165,27 +160,26 @@ update :: Msg -> Model -> (Model, Cmd Msg)
 -- Error Parsing
 update (ErrorParsing ci bs err) m =
     case m of
-        Uninitialized _ _ _ -> (m, logParsingErr ci bs err)
+        Uninitialized _ -> (m, logParsingErr ci bs err)
         (Uninitialized1 c _) -> (m, onParsingErr (listenPort c) ci bs err)
         Ready state -> (m, onParsingErr (listenPort $ conf state) ci bs err)
 
 -- Get new node id. Init server state, request tid for pinging seed node
-update (NewNodeId _ bs) (Uninitialized ix ss sz) =
-    (Uninitialized ix ss sz, initialCmds)
+update (NewNodeId _ bs) (Uninitialized cfg) =
+    (Uninitialized cfg { ourId = ourid }, initialCmds)
     where
         initialCmds = Cmd.batch [ logmsg, pingSeed ]
 
         seedsIx = fromInteger $ ((fromByteString bs) :: Integer)
-            `mod` fromIntegral (length $ indices ss)
+            `mod` fromIntegral (length $ indices (seedNodes cfg))
 
         pingSeed = Cmd.randomBytes
             tidsize
             (\t -> SendFirstMessage
-                { idx           = ix
-                , sendRecipient = ss ! seedsIx
+                { idx           = index cfg
+                , sendRecipient = (seedNodes cfg) ! seedsIx
                 , body          = (Query ourid Ping)
                 , newtid        = t
-                , newNodeId     = ourid
                 }
             )
 
@@ -199,32 +193,22 @@ update (NewNodeId _ bs) (Uninitialized ix ss sz) =
 
 update
     SendFirstMessage
-        { idx
-        , sendRecipient
+        { sendRecipient
         , body
         , newtid
-        , newNodeId
         }
-    (Uninitialized _ ss sz) =
-        ( Uninitialized1 conf newtid
+    (Uninitialized cfg) =
+        ( Uninitialized1 cfg newtid
         , Cmd.batch [ logmsg, sendCmd ]
         )
 
         where
-            conf = ServerConfig
-                { index = idx
-                , listenPort = servePort
-                , ourId = newNodeId
-                , seedNodes = ss
-                , bucketSize = sz
-                }
-
             logmsg = Cmd.log Cmd.DEBUG
                 [ "Sending initial", show kpacket , "to", show sendRecipient ]
 
             sendCmd =
                 Cmd.sendUDP
-                    (listenPort conf)
+                    (listenPort cfg)
                     sendRecipient
                     (BL.toStrict $ encode kpacket)
                     UDPError
@@ -436,9 +420,7 @@ update
                         }
                 Nothing -> state2
 
-update (Inbound _ ci kpacket) (Uninitialized ix ss sz) =
-    ((Uninitialized ix ss sz), log)
-
+update (Inbound _ ci kpacket) (Uninitialized cfg) = ((Uninitialized cfg), log)
     where
         log = Cmd.log Cmd.DEBUG
             [ "Ignoring received message while Uninitialized"
@@ -446,8 +428,8 @@ update (Inbound _ ci kpacket) (Uninitialized ix ss sz) =
             , show kpacket
             ]
 
-update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
-    ((Uninitialized1 conf tid), log)
+update (Inbound _ ci kpacket) (Uninitialized1 cfg tid) =
+    ((Uninitialized1 cfg tid), log)
 
     where
         log = Cmd.log Cmd.DEBUG
@@ -456,15 +438,10 @@ update (Inbound _ ci kpacket) (Uninitialized1 conf tid) =
             , show kpacket
             ]
 
-update (TimeoutTransactions _) (Uninitialized1 conf _) =
-    ( Uninitialized ix ss sz
-    , Cmd.randomBytes 20 $ NewNodeId ix
+update (TimeoutTransactions _) (Uninitialized1 cfg _) =
+    ( Uninitialized cfg
+    , Cmd.randomBytes 20 $ NewNodeId (index cfg)
     )
-
-    where
-        ix = index conf
-        ss = seedNodes conf
-        sz = bucketSize conf
 
 update (TimeoutTransactions now) (Ready state) =
     (Ready state { transactions = newtrns, routingTable = newrt }, log)
@@ -555,9 +532,9 @@ update (NewNodeId _ _)       (Uninitialized1 _ _)  = undefined
 update (NewNodeId _ _)       (Ready _)             = undefined
 update (SendFirstMessage {}) (Uninitialized1 _ _ ) = undefined
 update (SendFirstMessage {}) (Ready _)             = undefined
-update (SendMessage {})      (Uninitialized _ _ _) = undefined
+update (SendMessage {})      (Uninitialized _)     = undefined
 update (SendMessage {})      (Uninitialized1 _ _)  = undefined
-update (SendResponse {})     (Uninitialized _ _ _) = undefined
+update (SendResponse {})     (Uninitialized _)     = undefined
 update (SendResponse {})     (Uninitialized1 _ _)  = undefined
 update (PeersFoundResult _ _ _ _) _                = undefined
 update UDPError              _                     = undefined

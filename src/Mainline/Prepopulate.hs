@@ -19,7 +19,7 @@ nFind :: Int
 nFind = 1000
 
 bucketSize :: Int
-bucketSize = 64
+bucketSize = 128
 
 seedNodePort :: Port
 seedNodePort = 6881
@@ -42,14 +42,15 @@ data Model = Model
     , writeQ :: InChan CompactInfo
     }
 
-init :: InChan CompactInfo -> (Model, M.Cmd M.Msg)
-init inchan = (m, Cmd.batch [logmsg, Cmd.randomBytes 20 (M.NewNodeId 0)])
+init :: InChan CompactInfo -> Port -> (Model, M.Cmd M.Msg)
+init inchan p = (m, Cmd.batch [logmsg, Cmd.randomBytes 20 (M.NewNodeId 0)])
     where
-        m = Model (M.Uninitialized 0 seedNodes bucketSize) 0 inchan
+        m = Model (M.Uninitialized cfg) 0 inchan
         logmsg = Cmd.log Cmd.INFO [ "Prepopulate init" ]
+        cfg = M.ServerConfig 0 p undefined seedNodes bucketSize
 
 subscriptions :: Model -> Sub M.Msg
-subscriptions (Model { model = M.Uninitialized _ _ _}) = Sub.none
+subscriptions (Model { model = M.Uninitialized _}) = Sub.none
 subscriptions (Model { model = m, count = n })
     | n > nFind = Sub.none
     | otherwise = Sub.udp (getPort m) M.parseReceivedBytes M.UDPError
@@ -60,19 +61,20 @@ subscriptions (Model { model = m, count = n })
             ( M.Ready M.ServerState
                 { M.conf = M.ServerConfig { M.listenPort = p } }
             ) = p
-        getPort (M.Uninitialized _ _ _) = undefined
+        getPort (M.Uninitialized _) = undefined
 
 update :: M.Msg -> Model -> (Model, M.Cmd M.Msg)
 update (M.PeersFoundResult _ _ _ _) m = (m, Cmd.none)
 update (M.NodeAdded ci) m = (m { count = (count m) + 1 }, cmd)
     where
         cmd = Cmd.writeChan (writeQ m) ci
+
 update msg m = (m { model = mm }, cmds)
     where
         (mm, cmds) = M.update msg (model m)
 
-main :: IO [CompactInfo]
-main = do
+main :: Port -> IO [CompactInfo]
+main p = do
     (ins, outs) <- newChan
-    simpleApp (init ins) update subscriptions
+    simpleApp (init ins p) update subscriptions
     getChanContents outs >>= return . take nFind
