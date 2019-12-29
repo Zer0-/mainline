@@ -29,8 +29,8 @@ let
         src = pkgs.fetchFromGitHub {
           owner = "Zer0-";
           repo = "bittorrent";
-          rev = "e287673ce848a7503531930cf679a74624cbdc43";
-          sha256 = "198wlkryrzrvbh8z50h7qcgcjpsnd469k5icmrjx05hpn52hnpfz";
+          rev = "0d1556f8128dcb579cd4b31b327d795df246af72";
+          sha256 = "1kdjdkzqqyfpx4m0ihwgrnk06dxxxhhqz9knyfq19nzn271iaz3p";
         };
         isLibrary = true;
         isExecutable = true;
