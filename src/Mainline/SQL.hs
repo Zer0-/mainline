@@ -11,7 +11,6 @@
 module Mainline.SQL
     ( Schemas
     , runSetup
-    , connstr
     , queryExists
     , insertInfo
     , incrementScore
@@ -90,9 +89,6 @@ import Squeal.PostgreSQL
     , manipulateParams_
     , update_
     )
-
-connstr :: ByteString
-connstr = "host=192.168.4.2 dbname=test user=guest password=invisiblegiraffe"
 
 type Schemas = Public Schema
 
@@ -313,5 +309,5 @@ incrementScore :: ByteString -> Double -> PQ Schemas Schemas IO ()
 incrementScore infohash addscore =
     manipulateParams_ mIncrementScore (infohash, addscore)
 
-runSetup :: IO ()
-runSetup = withConnection connstr $ define setup
+runSetup :: ByteString -> IO ()
+runSetup connstr = withConnection connstr $ define setup

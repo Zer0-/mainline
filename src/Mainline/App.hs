@@ -46,18 +46,9 @@ import Mainline.RoutingTable (RoutingTable (..), nclosest)
 import qualified Mainline.ResolveMagnet as R
 import qualified Mainline.SQL as SQL
 import qualified Mainline.Prepopulate as Prepopulate
+import qualified Mainline.Config as Conf
 
 import Debug.Trace (trace)
-
--- Number of nodes on this port
-nMplex :: Int
-nMplex = 500
-
-msBetweenCallsToNode :: Int
-msBetweenCallsToNode = 1000
-
-scoreAggregateSeconds :: Int
-scoreAggregateSeconds = 60
 
 data Model = Model
     { models  :: Array Int M.Model
@@ -66,6 +57,8 @@ data Model = Model
     , queue   :: [(Int, Int, M.Msg)] -- WARN: unbounded
     , metadls :: Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model, Int) -- TODO: Time these out?
     , servePort :: Port
+    , msBetweenCallsToNode :: Int
+    , scoreAggregateSeconds :: Int
     }
 
 data MMsg
@@ -78,33 +71,37 @@ data MMsg
     | DBSaveOK Integer
     | DBSaveFail Integer
 
-main :: Port -> IO ()
-main p = do
+main :: Conf.Settings -> Port -> IO ()
+main settings p = do
     seeds <- Prepopulate.main p
-    SQL.runSetup
-    dbApp (init p $ seedNodes seeds) update subscriptions SQL.connstr
+    SQL.runSetup connstr
+    dbApp (init settings p $ seedNodes seeds) update subscriptions connstr
 
     where
+        connstr = Conf.sqlConnStr settings
         seedNodes seeds = listArray (0, length seeds - 1) seeds
 
-init :: Port -> Array Int CompactInfo -> (Model, Cmd MMsg)
-init p ss =
+init :: Conf.Settings -> Port -> Array Int CompactInfo -> (Model, Cmd MMsg)
+init settings p ss =
     ( Model
         { models = listArray
-            (0, nMplex - 1)
-            [M.Uninitialized $ mkCfg i 5 | i <- [0..nMplex-1]]
-        , tcache = newLRU (Just $ fromIntegral $ nMplex * 10)
-        , haves = newLRU (Just $ fromIntegral $ nMplex * 10)
+            (0, n - 1)
+            [M.Uninitialized $ mkCfg i | i <- [0..n - 1]]
+        , tcache = newLRU (Just $ fromIntegral $ n * 10)
+        , haves = newLRU (Just $ fromIntegral $ n * 10)
         , queue = []
         , metadls = Map.empty
         , servePort = p
+        , msBetweenCallsToNode = Conf.msBetweenCallsToNode settings
+        , scoreAggregateSeconds = Conf.scoreAggregateSeconds settings
         }
-    , Cmd.batch [mkCmd i | i <- [0..nMplex-1]]
+    , Cmd.batch [mkCmd i | i <- [0..n - 1]]
     )
 
     where
+        n = Conf.nMplex settings
         mkCmd i = Cmd.randomBytes 20 (MMsg . (NewNodeId i))
-        mkCfg ix sz = M.ServerConfig ix p undefined ss sz
+        mkCfg ix = M.ServerConfig ix p undefined ss (Conf.bucketSize settings)
 
 
 subscriptions :: Model -> Sub MMsg
@@ -191,7 +188,7 @@ update
         (newHaves, cmds2) =
             case mHaveInfo of
                 Just (created, n) ->
-                    if now - created > fromIntegral scoreAggregateSeconds
+                    if now - created > fromIntegral (scoreAggregateSeconds mm)
                     then
                         (insert infohash (now, 1) cached , insertScore (n + 1))
                     else (insert infohash (created, n + 1) cached, Cmd.none)
@@ -283,7 +280,7 @@ update (MMsg (Inbound _ ci ( KPacket { message }))) m =
 update
     (MMsg (SendFirstMessage {idx, sendRecipient, body, newtid}))
     m = sendOrQueue
-        (throttle (tcache m) h (fromInteger 0) msBetweenCallsToNode)
+        (throttle (tcache m) h (fromInteger 0) (msBetweenCallsToNode m))
         h
         msg
         idx
@@ -297,7 +294,7 @@ update
     (MMsg (SendMessage { idx, sendAction, targetNode, body, newtid, when }))
     m =
         sendOrQueue
-            (throttle (tcache m) h when msBetweenCallsToNode)
+            (throttle (tcache m) h when (msBetweenCallsToNode m))
             h
             msg
             idx
@@ -315,7 +312,7 @@ update (ProcessQueue now) m = foldl' f (m { queue = [] }, Cmd.none) (trace ("t P
         f (model, cmds) (i, key, msg) =
             let
                 (model2, cmds2) = sendOrQueue
-                    (throttle (tcache model) key now msBetweenCallsToNode)
+                    (throttle (tcache model) key now (msBetweenCallsToNode m))
                     key
                     msg
                     i

@@ -1,13 +1,13 @@
 import Control.Concurrent (forkIO)
 
-import Network.KRPC.Types (Port)
 import qualified Mainline.App as App
-
-ports :: [Port]
-ports = [51417..51424]
+import qualified Mainline.Config as Config
 
 getQuit :: IO ()
 getQuit = getLine >>= \l -> if l == "quit" then return () else getQuit
 
 main :: IO ()
-main = mapM_ (forkIO . App.main) ports >> getQuit
+main = do
+    settings <- Config.getConfig
+    mapM_ (forkIO . (App.main settings)) (Config.udpPorts settings)
+    getQuit

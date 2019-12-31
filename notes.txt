@@ -5,21 +5,3 @@ Move Mainline to Network.Mainline?
 Mainline/Scripts/SendUDPHello.hs to a common Runnables directory with App?
 Then we have Network.{Mainline, KRPC, Bittorrent}
 - but we still have all of the actual network calls under Architecture
-
-
-Priority
---------
-
-- fix non-exhaustive update function in ResolveMagnet ✓
-- fix recvBuf failure (caused by recv or TCP connection failure): ✓
-        Mainline: Network.Socket.recvBuf: resource vanished (Connection reset by peer)
-- fix sendBuf for the same reason ✓
-- Mainline: /dev/urandom: openFd: resource exhausted (Too many open files)
-    - How do we know that this is caused by too many open tcp sockets?
-    - How do we know this is not caused by trying to send too many things out?
-    - Or a failure to write to db. Threads shouldn't be quitting unexpectedly.
-- mismatch between "successfully downloaded" messsages and number of things
-  in db
-  - see how db errors are handled start. Then see if we can use catchIO on it. ✓
-        (needs catch, not catchIO)
-- store filenames in db as byte array ✓

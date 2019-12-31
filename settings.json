@@ -1,0 +1,20 @@
+{
+  "comment": "Fork a thread to listen to run on each port"
+, "udpPorts": [51417, 51418]
+
+, "comment": "Number of nodes per udp port"
+, "nMplex": 2
+
+, "comment": "Max number of items in a single bucket before its split"
+, "bucketSize": 5
+
+, "comment": "Minimum time between database score update calls per infohash"
+, "msBetweenCallsToNode": 1000
+
+, "comment": "Minimum time between database score update calls per infohash"
+, "scoreAggregateSeconds": 60
+
+, "sqlConnStr": "host=192.168.4.2 dbname=test user=guest password=invisiblegiraffe"
+
+, "minLoglvl": "INFO"
+}

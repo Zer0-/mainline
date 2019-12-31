@@ -13,7 +13,7 @@ let
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
       , DRBG, text, time, cabal-install, network-transport, cpu
       , parsec, lrucache, hex, cereal, data-default
-      , llvmPackages_6, safe-exceptions, unagi-chan
+      , llvmPackages_6, safe-exceptions, unagi-chan, aeson
       }:
       mkDerivation {
         pname = "Mainline";
@@ -25,7 +25,7 @@ let
           base bencoding bytestring containers Crypto network crypto-api
           DRBG text time cpu parsec lrucache cereal data-default bittorrent
           squeal-postgresql llvmPackages_6.llvm
-          safe-exceptions unagi-chan
+          safe-exceptions unagi-chan aeson
         ];
         testHaskellDepends = [
           base bencoding bytestring containers Crypto HUnit QuickCheck
