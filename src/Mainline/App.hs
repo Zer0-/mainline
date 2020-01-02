@@ -24,6 +24,9 @@ import Data.Torrent
     , PieceInfo (..)
     , LayoutInfo (..)
     )
+import Squeal.PostgreSQL.Pool (Pool)
+import Squeal.PostgreSQL (Connection)
+import Generics.SOP (K (..))
 
 import qualified Architecture.Cmd as Cmd
 import Architecture.TEA (dbApp)
@@ -71,14 +74,14 @@ data MMsg
     | DBSaveOK Integer
     | DBSaveFail Integer
 
-main :: Conf.Settings -> Port -> IO ()
-main settings p = do
+
+main :: Conf.Settings -> IO (Pool (K Connection SQL.Schemas))-> Port -> IO ()
+main settings mkPool p = do
     seeds <- Prepopulate.main p
-    SQL.runSetup connstr
-    dbApp (init settings p $ seedNodes seeds) update subscriptions connstr
+    SQL.runSetup $ Conf.sqlConnStr settings
+    dbApp (init settings p $ seedNodes seeds) update subscriptions mkPool
 
     where
-        connstr = Conf.sqlConnStr settings
         seedNodes seeds = listArray (0, length seeds - 1) seeds
 
 init :: Conf.Settings -> Port -> Array Int CompactInfo -> (Model, Cmd MMsg)

@@ -131,8 +131,9 @@ execTCmd _ _ Nothing (CmdDatabase _ _) = undefined
 
 execTCmd _ _ _ (CmdBounce m) = return (Just m)
 
-execTCmd wrT sink _ (CmdSendTCP t ci bs msg) = do
-    atomically $ sinkTCmd wrT sink (CmdSendTCP t ci bs msg) >> return Nothing
+execTCmd wrT sink _ (CmdSendTCP t ci bs msg) =
+    atomically $ sinkTCmd wrT sink (CmdSendTCP t ci bs msg)
+    >> return Nothing
 
 execTCmd wrT sink _ cmd = atomically $ sinkTCmd wrT sink cmd >> return Nothing
 
@@ -373,9 +374,7 @@ runMain q quit key qsink sock fsend istate cfg failmsg = do
             if not ok then updateOnFailure istate cfg failmsg >> again
             else again
 
-        Nothing -> do
-            atomically $ writeTQueue qsink (QuitW key)
-            return ()
+        Nothing -> atomically $ writeTQueue qsink (QuitW key) >> return ()
 
     where
         lexpr = readTQueue q >>= return . Just

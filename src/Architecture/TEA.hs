@@ -25,9 +25,8 @@ import Control.Concurrent.STM
 
 import Prelude hiding (init)
 import Generics.SOP (K (..))
-import Squeal.PostgreSQL.Pool (Pool, createConnectionPool, destroyConnectionPool)
+import Squeal.PostgreSQL.Pool (Pool, destroyConnectionPool)
 import Squeal.PostgreSQL (Connection)
-import Data.ByteString (ByteString)
 import Network.Socket (close)
 
 import Architecture.Internal.Cmd (runCmds, updateWriters)
@@ -46,12 +45,15 @@ loop self cfg = do
     mthing <- atomically $ do
         writeS <- readTVar (writeThreadS self)
 
-        if Map.null writeS && Map.null (readThreadS self) then
-            getThing `orElse` return Nothing
+        if Map.null writeS
+            && Map.null (readThreadS self)
+            && Map.null (sockets self) then
+                getThing `orElse` return Nothing
         else getThing
 
     case mthing of
-        Nothing -> maybe (return ()) destroyConnectionPool (dbPool self)
+        Nothing -> do
+            maybe (return ()) destroyConnectionPool (dbPool self)
         Just thing -> do
             newself <- case thing of
                 (Left (SocketResult key Nothing)) ->
@@ -102,7 +104,8 @@ loop self cfg = do
                         Just (WantBoth ([], _)) ->
                             error "No writes queued for new socket"
 
-                (Left tcmd) -> updateWriters tcmd self cfg
+                (Left tcmd) -> do
+                    updateWriters tcmd self cfg
                 (Right sub) ->
                     if hashSub sub == (curSubHash self) then return self
                     else updateSubscriptions sub cfg self
@@ -172,8 +175,8 @@ dbApp
     :: (model, Cmd msg schemas)
     -> (msg -> model -> (model, Cmd msg schemas))
     -> (model -> Sub msg)
-    -> ByteString
+    -> IO (Pool (K Connection schemas))
     -> IO ()
-dbApp initial fupdate subs connstr = do
-    pool <- createConnectionPool connstr 1 1 4
+dbApp initial fupdate subs createPool = do
+    pool <- createPool
     run (Just pool) initial fupdate subs

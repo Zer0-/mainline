@@ -19,6 +19,10 @@ import Squeal.PostgreSQL
     , PQ
     )
 
+import Squeal.PostgreSQL (Connection)
+import Squeal.PostgreSQL.Pool (Pool, createConnectionPool)
+import Generics.SOP (K (..))
+
 import Network.KRPC.Helpers (stringpack)
 import Architecture.TEA (dbApp)
 import qualified Architecture.Cmd as Cmd
@@ -63,7 +67,7 @@ subscriptions :: Model -> Sub Msg
 subscriptions n
     | n > 3 = Sub.none
     | otherwise = Sub.batch
-        [ Sub.udp 51411 (const Got) (error "udp error")
+        [ Sub.udp 51416 (const Got) (error "udp error")
         , Sub.timer 10000 Timeout
         ]
 
@@ -81,11 +85,16 @@ session i = do
     return ii
 
 
+createPool :: IO (Pool (K Connection EmptySchema))
+createPool = createConnectionPool connstr 1 1 1
+    where
+      connstr = stringpack
+        "host=192.168.4.2 dbname=test user=guest password=invisiblegiraffe"
+
 main :: IO ()
 main =
     dbApp
         init
         update
         subscriptions
-        (stringpack
-            "host=192.168.4.2 dbname=test user=guest password=invisiblegiraffe")
+        createPool

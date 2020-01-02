@@ -20,13 +20,14 @@ import Network.KRPC.Types (Port)
 import Architecture.Cmd (Loglevel (..))
 
 data Settings = Settings
-    { udpPorts :: [Port]
-    , nMplex :: Int
-    , bucketSize :: Int
-    , msBetweenCallsToNode :: Int
+    { udpPorts              :: [Port]
+    , nMplex                :: Int
+    , bucketSize            :: Int
+    , msBetweenCallsToNode  :: Int
     , scoreAggregateSeconds :: Int
-    , sqlConnStr :: ByteString
-    , minLoglvl :: Loglevel
+    , sqlConnStr            :: ByteString
+    , sqlConnPoolSize       :: Int
+    , minLoglvl             :: Loglevel
     } deriving Show
 
 instance FromJSON Settings where
@@ -39,15 +40,14 @@ instance FromJSON Settings where
         <*> do
             sqlConnText :: Text <- o .: "sqlConnStr"
             return $ encodeUtf8 sqlConnText
-
+        <*> o .: "sqlConnPoolSize"
         <*> do
             loglvlStr :: Text <- o .: "minLoglvl"
             case loglvlStr of
-                "DEBUG" -> return DEBUG
-                "INFO" -> return INFO
+                "DEBUG"   -> return DEBUG
+                "INFO"    -> return INFO
                 "WARNING" -> return WARNING
-                _ -> error "Invalid loglevel"
-            
+                _         -> error "Invalid loglevel"
 
     parseJSON _ = empty
 
