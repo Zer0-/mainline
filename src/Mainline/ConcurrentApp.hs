@@ -6,26 +6,28 @@ import Squeal.PostgreSQL (Connection)
 import Generics.SOP (K (..))
 
 import qualified Mainline.App as App
-import qualified Mainline.Config as Config
-import Mainline.SQL (Schemas)
+import qualified Mainline.Config as Conf
+import Mainline.SQL (Schemas, runSetup)
 
 getQuit :: IO ()
 getQuit = getLine >>= \l -> if l == "quit" then return () else getQuit
 
 createPool :: Int -> ByteString -> IO (Pool (K Connection Schemas))
-createPool n connstr = createConnectionPool connstr 1 1 n
+createPool n connstr = createConnectionPool connstr 2 60 n
 
 main :: IO ()
 main = do
-    settings <- Config.getConfig
+    settings <- Conf.getConfig
     print settings
+
+    runSetup $ Conf.sqlConnStr settings
 
     pool <- mkPool settings
 
     mapM_
       (forkIO . (App.main settings $ return pool))
-      (Config.udpPorts settings)
+      (Conf.udpPorts settings)
     getQuit
 
     where
-      mkPool s = createPool (Config.sqlConnPoolSize s) (Config.sqlConnStr s)
+      mkPool s = createPool (Conf.sqlConnPoolSize s) (Conf.sqlConnStr s)

@@ -78,7 +78,6 @@ data MMsg
 main :: Conf.Settings -> IO (Pool (K Connection SQL.Schemas))-> Port -> IO ()
 main settings mkPool p = do
     seeds <- Prepopulate.main p
-    SQL.runSetup $ Conf.sqlConnStr settings
     dbApp (init settings p $ seedNodes seeds) update subscriptions mkPool
 
     where
