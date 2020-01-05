@@ -18,7 +18,7 @@ module Mainline.SQL
     ) where
 
 import Generics.SOP (NP (..))
-import Data.Int (Int32)
+import Data.Int (Int32, Int64)
 import Data.Maybe (isJust)
 import Data.ByteString (ByteString)
 import Squeal.PostgreSQL
@@ -49,6 +49,7 @@ import Squeal.PostgreSQL
     , (&)
     , (>>>)
     , integer
+    , bigint
     , vararray
     , foreignKey
     , OnDeleteClause (..)
@@ -121,7 +122,7 @@ type FileInfoConstraints =
 type FileInfoColumns =
    '[ "info_id"    ::: 'NoDef :=> 'NotNull 'PGint4
     , "filepath"   ::: 'NoDef :=> 'NotNull ('PGvararray ('NotNull 'PGbytea))
-    , "size_bytes" ::: 'NoDef :=> 'NotNull 'PGint4
+    , "size_bytes" ::: 'NoDef :=> 'NotNull 'PGint8
     ]
 
 type InfoPiecesConstraints =
@@ -154,7 +155,7 @@ setup =
     createTableIfNotExists #file_info
         (  (integer & notNullable) `as` #info_id
         :* ( vararray bytea & notNullable )`as` #filepath
-        :* ( integer & notNullable ) `as` #size_bytes
+        :* ( bigint & notNullable ) `as` #size_bytes
         )
         (  primaryKey (#info_id :* #filepath) `as` #file_pk
         :* foreignKey #info_id #meta_info #info_id
@@ -233,7 +234,7 @@ type FileVal = NP
 
 
 mInsertFiles
-    :: [(Int32, [ByteString], Int32)]
+    :: [(Int32, [ByteString], Int64)]
     -> Manipulation_ Schemas () ()
 mInsertFiles haskValues =
     insertInto_ #file_info
@@ -243,7 +244,7 @@ mInsertFiles haskValues =
         )
 
     where
-        mkRow :: (Int32, [ByteString], Int32) -> FileVal
+        mkRow :: (Int32, [ByteString], Int64) -> FileVal
         mkRow (iid, path, size) =
             (  Set (literal iid) `as` #info_id
             :* Set (array $ map literal path) `as` #filepath
@@ -286,7 +287,7 @@ insertInfo
     -> ByteString -- name
     -> Double     -- score
     -> ByteString -- pieces hash blob
-    -> [([ByteString], Int32)] -- files (path, size)
+    -> [([ByteString], Int64)] -- files (path, size)
     -> PQ Schemas Schemas IO ()
 insertInfo infohash piecelen name score piecesBs filetups =
     transactionally_ $ do

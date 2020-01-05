@@ -5,7 +5,7 @@ module Mainline.App
 
 import Prelude hiding (init, lookup)
 import Data.Maybe (isJust)
-import Data.Int (Int32)
+import Data.Int (Int64)
 import qualified Data.Map as Map
 import Data.Array (Array, listArray, (!), (//), assocs)
 import Data.List (sortBy, foldl')
@@ -419,14 +419,14 @@ update (RMsg (R.Have now infohash infodict)) model =
         getName SingleFile { liFile } = fiName liFile
         getName MultiFile { liDirName } = liDirName
 
-        getFileTups :: LayoutInfo -> [([ByteString], Int32)]
+        getFileTups :: LayoutInfo -> [([ByteString], Int64)]
         getFileTups SingleFile { liFile } =
             [( [fiName liFile]
             ,  fromIntegral $ fiLength liFile
             )]
         getFileTups MultiFile { liFiles } = map mkFileTup liFiles
 
-        mkFileTup :: FileInfo [ByteString] -> ([ByteString], Int32)
+        mkFileTup :: FileInfo [ByteString] -> ([ByteString], Int64)
         mkFileTup FileInfo { fiLength, fiName } =
             (fiName, fromIntegral $ fiLength)
 
