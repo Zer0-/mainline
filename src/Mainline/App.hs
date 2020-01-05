@@ -58,10 +58,16 @@ data Model = Model
     , tcache  :: LRU Int POSIXTime
     , haves   :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
     , queue   :: [(Int, Int, M.Msg)] -- WARN: unbounded
-    , metadls :: Map.Map InfoHash (R.Model, Map.Map CompactInfo R.Model, Int) -- TODO: Time these out?
+    , metadls :: Map.Map InfoHash MetaDownloadsData
     , servePort :: Port
     , msBetweenCallsToNode :: Int
     , scoreAggregateSeconds :: Int
+    }
+
+data MetaDownloadsData = MetaDownloadsData
+    { sharedModel :: R.Model
+    , ongoing :: Map.Map CompactInfo R.Model
+    , idx_ :: Int
     }
 
 data MMsg
@@ -123,7 +129,7 @@ subscriptions mm = Sub.batch $
         rsubs = map (\(ih, (ci, mdl)) -> R.subscriptions ih ci mdl) rmodels
 
         rmodels = Map.assocs (metadls mm)
-            >>= \(ih, (_, m, _)) -> zip (repeat ih) (Map.assocs m)
+            >>= \(ih, dls) -> zip (repeat ih) (Map.assocs (ongoing dls))
 
 
 update :: MMsg -> Model -> (Model, Cmd MMsg)
@@ -359,20 +365,23 @@ update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
 
         dls = metadls model
 
-        metadlsA = Map.insert infohash (R.Off, initialMdls, idx) dls
+        metadlsA = Map.insert
+            infohash
+            (MetaDownloadsData R.Off initialMdls idx)
+            dls
 
         -- For the case of existing download
         existingInfo = dls Map.! infohash
 
         existingMdls :: Map.Map CompactInfo R.Model
-        existingMdls = (\(_, x, _) -> x) existingInfo
+        existingMdls = ongoing existingInfo
 
-        newMdls :: (R.Model, Map.Map CompactInfo R.Model, Int)
-        newMdls =
-            ( (\(x, _, _) -> x) existingInfo
-            , existingMdls `Map.union` initialMdls
-            , idx
-            )
+        newMdls :: MetaDownloadsData
+        newMdls = MetaDownloadsData
+            { sharedModel = sharedModel existingInfo
+            , ongoing = existingMdls `Map.union` initialMdls
+            , idx_ = idx
+            }
 
         newcmds :: [Cmd R.Msg]
         newcmds = map (snd . snd) $
@@ -434,8 +443,8 @@ update (RMsg (R.Have now infohash infodict)) model =
         dlinfo = Map.lookup infohash (metadls model)
 
         newmdls = case dlinfo of
-            Just (_, _, idx) ->
-                ms // [(idx, removeGettingPeers (ms ! idx) infohash)]
+            Just (MetaDownloadsData {idx_}) ->
+                ms // [(idx_, removeGettingPeers (ms ! idx_) infohash)]
 
             Nothing -> ms
 
@@ -460,10 +469,10 @@ update (RMsg (R.TCPError infohash ci)) model =
     where
         newdls =
             Map.update
-                ( \(a, dls, idx) ->
-                    let dls2 = Map.delete ci dls in
-                    if Map.null dls2 then Nothing
-                    else Just (a, dls2, idx)
+                ( \dls ->
+                    let next = Map.delete ci (ongoing dls) in
+                    if Map.null next then Nothing
+                    else Just (dls { ongoing = next })
                 )
                 infohash
                 (metadls model)
@@ -477,29 +486,29 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
         mdl = Map.lookup infohash dls
 
         (newdls, cmds) = case mdl of
-            Just (sharedmodel, rmodelm, idx) ->
+            Just (MetaDownloadsData { sharedModel, ongoing, idx_ }) ->
                 let
-                    (newmodel, cmds1) = case Map.lookup ci rmodelm of
-                        Just rmodel2 -> updateRModel sharedmodel rmodel2
+                    (newmodel, cmds1) = case Map.lookup ci ongoing of
+                        Just rmodel2 -> updateRModel sharedModel rmodel2
                         Nothing ->
                             ( R.Off
                             , Cmd.log Cmd.DEBUG
                                 [ "CompactInfo for RMsg not in our state." ]
                             )
 
-                    newmodelm = case newmodel of
-                        R.Off -> Map.delete ci rmodelm
-                        _ -> Map.insert ci newmodel rmodelm
+                    next = case newmodel of
+                        R.Off -> Map.delete ci ongoing
+                        _ -> Map.insert ci newmodel ongoing
 
                     newSharedMdl = case newmodel of
                         R.Downloading {} -> newmodel
-                        _ -> sharedmodel
+                        _ -> sharedModel
 
-                    newdls1 = case Map.null newmodelm of
+                    newdls1 = case Map.null next of
                         True -> Map.delete infohash dls
                         False -> Map.insert
                             infohash
-                            (newSharedMdl, newmodelm, idx)
+                            (MetaDownloadsData newSharedMdl next idx_)
                             dls
 
                 in
@@ -675,8 +684,8 @@ hashci (CompactInfo ip port) = hashWithSalt (hash ip) port
 adaptResult :: (msg0 -> msg1) -> (a, Cmd msg0) -> (a, Cmd msg1)
 adaptResult f (model, cmd) = (model, Cmd.up f cmd)
 
-countOngoingDls :: Map.Map a (b, Map.Map c b, d) -> Int
-countOngoingDls m = sum $ map (\(_, s, _) -> Map.size s) (Map.elems m)
+countOngoingDls :: Map.Map a MetaDownloadsData -> Int
+countOngoingDls m = foldl (\i j -> i + (Map.size $ ongoing j)) 0 m
 
 e :: Integer -> Integer -> Integer
 e = (^)
