@@ -81,7 +81,7 @@ data MMsg
     | DBSaveFail Integer
 
 
-main :: Conf.Settings -> IO (Pool (K Connection SQL.Schemas))-> Port -> IO ()
+main :: Conf.Settings -> IO (Pool (K Connection SQL.Schemas)) -> Port -> IO ()
 main settings mkPool p = do
     seeds <- Prepopulate.main p
     dbApp (init settings p $ seedNodes seeds) update subscriptions mkPool

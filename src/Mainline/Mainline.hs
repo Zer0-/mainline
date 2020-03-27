@@ -795,16 +795,11 @@ handleResponse
             idx = index cf
 
 handleResponse
-    node
+    _
     (TransactionState _ KeepAlive _)
-    now
+    _
     Pong
-    state = (newstate, Cmd.none)
-        where
-            newstate = state
-                { routingTable =
-                    updateTime (routingTable state) (nodeId node) now
-                }
+    state = (state, Cmd.none) -- updateTime is called anyway
 
 -- Ignore the rest
 handleResponse
