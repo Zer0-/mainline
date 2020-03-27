@@ -29,6 +29,12 @@ import Network.KRPC.InternalConstants
     )
 
 import Network.Transport.Internal (decodeWord16, decodeWord32)
+import TestBinaryTrie
+    ( trieHasInsertedKey
+    , deletedNotInTrie
+    , closestReturnsSomething
+    , closestIsXorClosest
+    )
 
 --import Debug.Trace
 
@@ -389,6 +395,12 @@ tests =
         , testProperty "decode PeersFound Values Message"        fmt_decodeFoundValuesResponse
         , testProperty "decode PeersFound Nodes Message"         fmt_decodeFoundNodesResponse
         , testProperty "decode Announce Peer Query"              fmt_decodeAnnoucePeerQuery
+        ]
+    , testGroup "Binary Particia Trie"
+        [ testProperty "contains inserted key" trieHasInsertedKey
+        , testProperty "delete works" deletedNotInTrie
+        , testProperty "closest always returns value" closestReturnsSomething
+        , testProperty "closest value is xor distance closest" closestIsXorClosest
         ]
     ]
 

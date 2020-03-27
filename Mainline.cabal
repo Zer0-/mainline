@@ -25,6 +25,7 @@ test-suite Main
                    hashable,
                    containers,
                    text,
+                   time,
                    cpu,
                    parsec,
                    network-transport,
@@ -40,6 +41,9 @@ test-suite Main
                    Network.KRPC.InternalConstants
                    Network.Octets
                    Mainline.Bucket
+                   Mainline.RoutingTable
+                   Data.BinaryTrie
+                   TestBinaryTrie
   ghc-options:     -Wall -rtsopts
   hs-source-dirs:  src, tests
   default-language: Haskell2010

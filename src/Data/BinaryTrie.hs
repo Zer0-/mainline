@@ -4,19 +4,30 @@
  - <http://citeseer.ist.psu.edu/okasaki98fast.html>
  -}
 
+module Data.BinaryTrie
+    ( lookup
+    , empty
+    , closest
+    , delete
+    , insert
+    , fromList
+    , Trie
+    ) where
+
 
 import Data.Bits((.&.), (.|.), xor, complement)
 
 import Prelude hiding (lookup)
 import Data.Foldable (foldl')
 
-import Debug.Trace (trace)
-
 data Trie a
     = Empty
     | Leaf Integer a
     | Branch Integer Integer (Trie a) (Trie a)
     deriving Show
+
+empty :: Trie a
+empty = Empty
 
 br :: Integer -> Integer -> Trie a -> Trie a -> Trie a
 br _ _ Empty t = t
@@ -137,6 +148,7 @@ example :: Trie String
 example = Branch 0 1 (Leaf 4 "Hi") (Leaf 3 "You")
 -}
 
+{-
 example2 :: Trie String
 --example2 = fromList [(7, "asdf"), (13, "yay"), (1, "cake")]
 example2 = fromList [(4, "yay"), (7, "foot"), (13, "wtf"), (1, "cake")]
@@ -150,6 +162,7 @@ main = do
     mapM_ (\i -> putStrLn $ "xor 4:" ++ show (i `xor` 4) ++ " xor 7:" ++ show (i `xor` 7) ++ " xor 13:" ++ show (i `xor` 13) ++ " " ++ (show . (closest example2)) i) [0..15]
     putStrLn ""
     print example2
+-}
 
 {-
  - Quickchecks:
