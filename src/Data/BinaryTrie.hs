@@ -70,7 +70,6 @@ mask k m = (k .|. (m - 1)) .&. (complement m)
 matchPrefix :: Integer -> Integer -> Integer -> Bool
 matchPrefix k p m = (mask k m) == p
 
-{-
 join :: Integer -> Integer -> Trie a -> Integer -> Integer -> Trie a -> Trie a
 join p0 m0 t0 p1 m1 t1 = if zeroBit p0 m
     then Branch p3 m t0 t1
@@ -79,16 +78,6 @@ join p0 m0 t0 p1 m1 t1 = if zeroBit p0 m
     where
         m = branchingBit p0 m0 p1 m1
         p3 = mask p0 m
--}
-join :: Show a => Integer -> Trie a -> Integer -> Trie a -> Trie a
-join p0 t0 p1 t1 = if zeroBit p0 m
-    then Branch p3 m t0 t1
-    else Branch p3 m t1 t0
-
-    where
-        m = branchingBit p0 p1
-        p3 = mask p0 m
-
 
 insert :: Show a => Integer -> a -> Trie a -> Trie a
 insert k x t = ins t
@@ -96,13 +85,13 @@ insert k x t = ins t
         ins Empty = Leaf k x
         ins (Leaf j y) =
             if j == k then Leaf k x
-            else join k (Leaf k x) j (Leaf j y)
+            else join k 0 (Leaf k x) j 0 (Leaf j y)
         ins (Branch p m t0 t1) =
             if matchPrefix k p m then
                 if zeroBit k m
                 then Branch p m (ins t0) t1
                 else Branch p m t0 (ins t1)
-            else join k (Leaf k x) p (Branch p m t0 t1)
+            else join k 0 (Leaf k x) p m (Branch p m t0 t1)
 
 
 {- for little endian trees
@@ -111,13 +100,8 @@ branchingBit p0 p1 = lowestBit (p0 `xor` p1)
 -}
 
 -- for big endian trees
-{-
 branchingBit :: Integer -> Integer -> Integer -> Integer -> Integer
 branchingBit p0 m0 p1 m1 = highestBit (p0 `xor` p1) (max 1 (2 * max m0 m1))
--}
-
-branchingBit :: Integer -> Integer -> Integer
-branchingBit p0 p1 = highestBit (p0 `xor` p1)
 
 twosComplement :: Integer -> Integer
 twosComplement x = (complement x) + 1
@@ -125,7 +109,6 @@ twosComplement x = (complement x) + 1
 lowestBit :: Integer -> Integer
 lowestBit x = x .&. (twosComplement x)
 
-{-
 highestBit :: Integer -> Integer -> Integer
 highestBit x m = highb x_
     where
@@ -133,38 +116,6 @@ highestBit x m = highb x_
         highb y =
             let n = lowestBit y
             in if y == n then n else highb (y - n)
--}
-
-highestBit :: Integer -> Integer
-highestBit x = if x == m then m else highestBit (x - m)
-    where
-        m = lowestBit x
 
 fromList :: (Foldable t, Show a) => t (Integer, a) -> Trie a
 fromList = foldl' (flip (uncurry insert)) Empty
-
-{-
-example :: Trie String
-example = Branch 0 1 (Leaf 4 "Hi") (Leaf 3 "You")
--}
-
-{-
-example2 :: Trie String
---example2 = fromList [(7, "asdf"), (13, "yay"), (1, "cake")]
-example2 = fromList [(4, "yay"), (7, "foot"), (13, "wtf"), (1, "cake")]
-
-main :: IO ()
-main = do
-    mapM_ (putStrLn . show . (lookup example2)) [0..15]
-    putStrLn ""
-    mapM_ (putStrLn . show . (lookup (delete example2 13))) [0..15]
-    putStrLn ""
-    mapM_ (\i -> putStrLn $ "xor 4:" ++ show (i `xor` 4) ++ " xor 7:" ++ show (i `xor` 7) ++ " xor 13:" ++ show (i `xor` 13) ++ " " ++ (show . (closest example2)) i) [0..15]
-    putStrLn ""
-    print example2
--}
-
-{-
- - Quickchecks:
- - Any trie, insert one node, always has that node
- -}
