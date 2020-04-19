@@ -13,7 +13,7 @@ let
       , test-framework-hunit, test-framework-quickcheck2, crypto-api
       , DRBG, text, time, cabal-install, network-transport, cpu
       , parsec, lrucache, hex, cereal, data-default
-      , llvmPackages_6, safe-exceptions, unagi-chan, aeson
+      , llvmPackages_6, safe-exceptions, unagi-chan, aeson, criterion
       }:
       mkDerivation {
         pname = "Mainline";
@@ -31,6 +31,9 @@ let
           base bencoding bytestring containers Crypto HUnit QuickCheck
           test-framework test-framework-hunit test-framework-quickcheck2
           cabal-install network-transport hex
+        ];
+        benchmarkHaskellDepends = [
+          base criterion containers
         ];
         license = {
           fullName = "Server Side Public License";

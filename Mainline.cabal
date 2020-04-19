@@ -174,3 +174,19 @@ executable Teatime
   ghc-options:      -Wall -rtsopts -O2 -threaded -fllvm -dynamic
   default-language: Haskell2010
   main-is:          Architecture/Hello.hs
+
+benchmark Maineline-benchmark
+  default-language: Haskell2010
+  hs-source-dirs:   bench src
+  main-is:          Benchmark.hs
+  type:             exitcode-stdio-1.0
+  build-depends:
+                   base >= 4.7 && < 5,
+                   criterion,
+                   bytestring,
+                   DRBG,
+                   crypto-api,
+                   containers
+  other-modules:
+                   Data.BinaryTrie
+  ghc-options:     -Wall -rtsopts -O2 -fllvm -dynamic
