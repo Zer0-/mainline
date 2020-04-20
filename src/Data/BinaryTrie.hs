@@ -103,19 +103,19 @@ branchingBit p0 p1 = lowestBit (p0 `xor` p1)
 branchingBit :: Integer -> Integer -> Integer -> Integer -> Integer
 branchingBit p0 m0 p1 m1 = highestBit (p0 `xor` p1) (max 1 (2 * max m0 m1))
 
-twosComplement :: Integer -> Integer
-twosComplement x = (complement x) + 1
 
 lowestBit :: Integer -> Integer
-lowestBit x = x .&. (twosComplement x)
+lowestBit x = x .&. (-x)
+
 
 highestBit :: Integer -> Integer -> Integer
 highestBit x m = highb x_
     where
         x_ = x .&. (complement (m - 1))
         highb y =
-            let n = lowestBit y
-            in if y == n then n else highb (y - n)
+            let n = lowestBit $! y
+            in if y == n then n else highb $! (y - n)
+
 
 fromList :: (Foldable t, Show a) => t (Integer, a) -> Trie a
 fromList = foldl' (flip (uncurry insert)) Empty

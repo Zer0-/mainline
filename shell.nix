@@ -49,4 +49,6 @@ let
   drv = haskellPackages.callPackage f {};
 
 in
-  if pkgs.lib.inNixShell then drv.env else drv
+  if pkgs.lib.inNixShell then
+    (pkgs.haskell.lib.doBenchmark drv).env
+  else drv
