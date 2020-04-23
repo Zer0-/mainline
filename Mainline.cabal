@@ -97,9 +97,10 @@ executable Mainline
                    Network.KRPC.InternalConstants
                    Network.KRPC.Types
                    Network.Octets
+                   Data.BinaryTrie
   hs-source-dirs:  src
-  ghc-options:     -Wall -rtsopts -threaded -O2 -fllvm -dynamic
-  -- -prof -fprof-auto
+  ghc-options:     -Wall -rtsopts -threaded -O2 -fllvm -prof -fprof-auto
+  -- -dynamic
   default-language: Haskell2010
   main-is:         Mainline/ConcurrentApp.hs
 

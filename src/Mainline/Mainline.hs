@@ -30,7 +30,7 @@ import Data.Time.Clock.POSIX         (POSIXTime)
 import Data.Array                    (Array, (!), indices)
 
 --import Architecture.TEA              (Config (..), run)
--- import Architecture.Cmd              (Cmd)
+--import Architecture.Cmd              (Cmd)
 import qualified Architecture.Cmd as Cmd
 --import qualified Architecture.Sub as Sub
 --import Architecture.Sub              (Sub, Received (..))

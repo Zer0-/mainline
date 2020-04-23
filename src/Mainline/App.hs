@@ -4,13 +4,11 @@ module Mainline.App
     (main) where
 
 import Prelude hiding (init, lookup)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, fromJust)
 import Data.Int (Int64)
 import qualified Data.Map as Map
 import Data.Array (Array, listArray, (!), (//), assocs)
-import Data.List (sortBy, foldl')
-import Data.Bits (xor)
-import Data.Function (on)
+import Data.List (foldl')
 import Data.Foldable (toList)
 import Data.Cache.LRU (LRU, newLRU, lookup, insert)
 import Data.Time.Clock.POSIX (POSIXTime)
@@ -28,6 +26,7 @@ import Squeal.PostgreSQL.Pool (Pool)
 import Squeal.PostgreSQL (Connection)
 import Generics.SOP (K (..))
 
+import qualified Data.BinaryTrie as BPT
 import qualified Architecture.Cmd as Cmd
 import Architecture.TEA (dbApp)
 import Architecture.Sub (Sub)
@@ -44,8 +43,8 @@ import Network.KRPC.Types
     , Port
     )
 import Network.KRPC.Helpers (hexify)
-import Network.Octets (octToByteString)
-import Mainline.RoutingTable (RoutingTable (..), nclosest)
+import Network.Octets (octToByteString, fromByteString)
+import Mainline.RoutingTable (nclosest)
 import qualified Mainline.ResolveMagnet as R
 import qualified Mainline.SQL as SQL
 import qualified Mainline.Prepopulate as Prepopulate
@@ -54,11 +53,12 @@ import qualified Mainline.Config as Conf
 import Debug.Trace (trace)
 
 data Model = Model
-    { models  :: Array Int M.Model
-    , tcache  :: LRU Int POSIXTime
-    , haves   :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
-    , queue   :: [(Int, Int, M.Msg)] -- WARN: unbounded
-    , metadls :: Map.Map InfoHash MetaDownloadsData
+    { models    :: Array Int M.Model
+    , modelMap  :: BPT.Trie Int
+    , tcache    :: LRU Int POSIXTime
+    , haves     :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
+    , queue     :: [(Int, Int, M.Msg)] -- WARN: unbounded
+    , metadls   :: Map.Map InfoHash MetaDownloadsData
     , servePort :: Port
     , msBetweenCallsToNode :: Int
     , scoreAggregateSeconds :: Int
@@ -95,6 +95,7 @@ init settings p ss =
         { models = listArray
             (0, n - 1)
             [M.Uninitialized $ mkCfg i | i <- [0..n - 1]]
+        , modelMap = BPT.empty
         , tcache = newLRU (Just $ fromIntegral $ n * 10)
         , haves = newLRU (Just $ fromIntegral $ n * 10)
         , queue = []
@@ -109,7 +110,7 @@ init settings p ss =
     where
         n = Conf.nMplex settings
         mkCmd i = Cmd.randomBytes 20 (MMsg . (NewNodeId i))
-        mkCfg ix = M.ServerConfig ix p undefined ss (Conf.bucketSize settings)
+        mkCfg ix = M.ServerConfig ix p 0 ss (Conf.bucketSize settings)
 
 
 subscriptions :: Model -> Sub MMsg
@@ -133,7 +134,17 @@ subscriptions mm = Sub.batch $
 
 
 update :: MMsg -> Model -> (Model, Cmd MMsg)
-update (MMsg (NewNodeId ix bs)) m = updateExplicit (NewNodeId ix bs) m ix
+update (MMsg (NewNodeId ix bs)) m =
+    updateExplicit
+        (NewNodeId ix bs)
+        (m { modelMap = newmap })
+        ix
+
+    where
+        newmap = BPT.insert (fromByteString bs) ix $
+            BPT.delete (modelMap m) oldNodeId
+        oldNodeId = M.ourId $ getConfig $ (models m) ! ix
+
 update (MMsg (ErrorParsing ci bs err)) m =
     (m, Cmd.up MMsg $ M.onParsingErr (servePort m) ci bs err)
 update
@@ -189,7 +200,7 @@ update
     where
         msg = Inbound now ci (KPacket transactionId (Query nodeid q) v)
         q = AnnouncePeer impliedPort infohash port token mname
-        idx = queryToIndex (Query nodeid q) mm
+        idx = queryToIndex nodeid q mm
         (model, cmds) = updateExplicit msg mm idx
         (_, mHaveInfo) = lookup infohash cached
 
@@ -277,7 +288,7 @@ update
             }
         )
     ))
-    mm = updateExplicit msg mm (queryToIndex (Query nodeid q) mm)
+    mm = updateExplicit msg mm (queryToIndex nodeid q mm)
 
     where
         msg = Inbound t ci (KPacket transactionId (Query nodeid q) v)
@@ -567,43 +578,17 @@ update (DBSaveFail infohash) model = (model, logmsg)
             , show $ hexify $ octToByteString infohash
             ]
 
-queryToIndex :: Message -> Model -> Int
-queryToIndex
-    (Query nodeid q)
-    mm = fst $ head sorted
+
+queryToIndex :: Integer -> QueryDat -> Model -> Int
+queryToIndex nodeid q model =
+    fromJust $ BPT.closest (modelMap model) identifier
 
     where
-        know = filter (fil . snd) ms
-
-        sorted = if null know then closest ms else closest know
-
-        closest :: [(Int, M.Model)] -> [(Int, M.Model)]
-        closest = sortBy (sortg `on` (getid . snd))
-
-        sortg i j
-            | i == j      = EQ
-            | cf i < cf j = LT
-            | otherwise   = GT
-
-        cf = case q of
-            FindNode       nid       -> af nid
-            GetPeers       ifo       -> af ifo
-            AnnouncePeer _ ifo _ _ _ -> af ifo
-            _                        -> bf
-
-        af aux i = min (nodeid `xor` i) (aux `xor` i)
-        bf = xor nodeid
-
-        getid (M.Ready state) = M.ourId $ M.conf state
-        getid (M.Uninitialized1 conf _) = M.ourId conf
-        getid (M.Uninitialized _) = -(2`e`161)
-
-        ms = assocs (models mm)
-
-        fil (M.Ready state) = Map.member nodeid (nodes $ M.routingTable state)
-        fil _ = False
-
-queryToIndex _ _ = undefined
+        identifier = case q of
+            FindNode       nid       -> nid
+            GetPeers       ifo       -> ifo
+            AnnouncePeer _ ifo _ _ _ -> ifo
+            Ping                     -> nodeid
 
 
 updateExplicit :: M.Msg -> Model -> Int -> (Model, Cmd MMsg)
@@ -687,5 +672,7 @@ adaptResult f (model, cmd) = (model, Cmd.up f cmd)
 countOngoingDls :: Map.Map a MetaDownloadsData -> Int
 countOngoingDls m = foldl (\i j -> i + (Map.size $ ongoing j)) 0 m
 
-e :: Integer -> Integer -> Integer
-e = (^)
+getConfig :: M.Model -> M.ServerConfig
+getConfig (M.Uninitialized cfg) = cfg
+getConfig (M.Uninitialized1 cfg _) = cfg
+getConfig (M.Ready sstate) = M.conf sstate

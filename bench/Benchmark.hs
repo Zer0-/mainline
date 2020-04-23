@@ -66,8 +66,8 @@ createTrieEnv :: Int -> IO [Integer]
 createTrieEnv n = makeRandomIntegers n infohashMaxBytes
 
 
-main2 :: IO ()
-main2 = defaultMain
+main :: IO ()
+main = defaultMain
     [
         bgroup "Binary Particia Trie"
             [ env
@@ -86,18 +86,6 @@ main2 = defaultMain
                     , bench "10000 BPT" $ whnf (insertDeleteBPT ints) 10000
                     , bench "10000 Map" $ whnf (insertDeleteMap ints) 10000
                     ]
-                )
-            ]
-    ]
-
-main :: IO ()
-main = defaultMain
-    [
-        bgroup "Binary Particia Trie"
-            [ env
-                (createTrieEnv 10000)
-                ( \ints -> bgroup "all"
-                    [ bench "10000 BPT" $ whnf (insertDeleteBPT ints) 10000 ]
                 )
             ]
     ]
