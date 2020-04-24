@@ -8,7 +8,6 @@ module Mainline.ResolveMagnet
     , chooseNextBlk
     ) where
 
-import Prelude hiding (init)
 import Control.Applicative (liftA2)
 import Data.Word (Word8, Word32)
 import Data.Map (Map)
@@ -323,9 +322,3 @@ pieceReq msgid i t ci =
         ci
         (encode (BT.Extended $ BT.EMetadata msgid (BT.MetadataRequest i)))
         (TCPError t ci)
-
-
-{-
-main :: IO ()
-main = simpleApp init update subscriptions
--}

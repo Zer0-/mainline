@@ -339,10 +339,10 @@ update (ProcessQueue now) m = foldl' f (m { queue = [] }, Cmd.none) (trace ("t P
             in (model2, Cmd.batch [cmds, cmds2])
 
 update (MMsg (TimeoutTransactions now)) m =
-    propagateTimer (TimeoutTransactions now) m
+    fanOutMsg (TimeoutTransactions now) m
 
 update (MMsg (MaintainPeers now)) m =
-    propagateTimer (MaintainPeers now) m
+    fanOutMsg (MaintainPeers now) m
 
 update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
     | Map.member infohash dls =
@@ -602,8 +602,8 @@ updateExplicit msg model ix =
         (mm, cmds) = M.update msg (m ! ix)
 
 
-propagateTimer :: M.Msg -> Model -> (Model, Cmd MMsg)
-propagateTimer msg m = (m { models = models2 }, cmds)
+fanOutMsg :: M.Msg -> Model -> (Model, Cmd MMsg)
+fanOutMsg msg m = (m { models = models2 }, cmds)
     where
         modelCmds = fmap f (models m)
         f = M.update msg
