@@ -445,7 +445,7 @@ merge c1 (m, c2) = (m, batch [c1, c2])
 
 
 batch :: [ Cmd msg schemas ] -> Cmd msg schemas
-batch cmds = Cmd $ concat [t | (Cmd t) <- cmds]
+batch cmds = Cmd $ cmds >>= \(Cmd t) -> t
 
 
 getKey :: TCmd msg schemas -> Int
