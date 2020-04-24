@@ -52,6 +52,9 @@ import qualified Mainline.Config as Conf
 
 import Debug.Trace (trace)
 
+metaDlTimeout :: Int
+metaDlTimeout = 60
+
 data Model = Model
     { models    :: Array Int M.Model
     , modelMap  :: BPT.Trie Int
@@ -67,6 +70,7 @@ data Model = Model
 data MetaDownloadsData = MetaDownloadsData
     { sharedModel :: R.Model
     , ongoing :: Map.Map CompactInfo R.Model
+    , lastActivity :: POSIXTime
     , idx_ :: Int
     }
 
@@ -74,6 +78,7 @@ data MMsg
     = MMsg M.Msg
     | RMsg R.Msg
     | ProcessQueue POSIXTime
+    | TimeoutTimedOuts POSIXTime
     | DBHasInfo POSIXTime Integer Int Bool
     | DBInfoLookupFail
     | DBSetScoreFail
@@ -121,7 +126,7 @@ subscriptions mm = Sub.batch $
         (\ci r -> MMsg $ M.parseReceivedBytes ci r)
         (MMsg M.UDPError)
     , Sub.timer 1000 ProcessQueue
-    , Sub.timer (60 * 1000) (\t -> MMsg $ M.TimeoutTransactions t)
+    , Sub.timer (60 * 1000) (\t -> TimeoutTimedOuts t)
     , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ M.MaintainPeers t)
     ]
 
@@ -338,13 +343,17 @@ update (ProcessQueue now) m = foldl' f (m { queue = [] }, Cmd.none) (trace ("t P
                     model
             in (model2, Cmd.batch [cmds, cmds2])
 
-update (MMsg (TimeoutTransactions now)) m =
-    fanOutMsg (TimeoutTransactions now) m
+update (TimeoutTimedOuts now) m =
+    fanOutMsg (TimeoutTransactions now) withoutStaleDownloads
+
+    where
+        withoutStaleDownloads = m { metadls = Map.filter ff $ metadls m }
+        ff metadl = now - (lastActivity metadl) > fromIntegral metaDlTimeout
 
 update (MMsg (MaintainPeers now)) m =
     fanOutMsg (MaintainPeers now) m
 
-update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
+update (MMsg (PeersFoundResult now idx nodeid infohash peers)) model
     | Map.member infohash dls =
         ( model { metadls = metadlsB }
         , Cmd.batch [Cmd.up RMsg (Cmd.batch newcmds), mklog metadlsB]
@@ -378,7 +387,7 @@ update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
 
         metadlsA = Map.insert
             infohash
-            (MetaDownloadsData R.Off initialMdls idx)
+            (MetaDownloadsData R.Off initialMdls now idx)
             dls
 
         -- For the case of existing download
@@ -391,6 +400,7 @@ update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
         newMdls = MetaDownloadsData
             { sharedModel = sharedModel existingInfo
             , ongoing = existingMdls `Map.union` initialMdls
+            , lastActivity = now
             , idx_ = idx
             }
 
@@ -404,6 +414,8 @@ update (MMsg (PeersFoundResult idx nodeid infohash peers)) model
 update (MMsg UDPError) model = (model, Cmd.log Cmd.WARNING ["UDPError"])
 
 update (MMsg (NodeAdded _)) model = (model, Cmd.none)
+
+update (MMsg (TimeoutTransactions _)) _ = undefined
 
 update (RMsg (R.Have now infohash infodict)) model =
     ( model
@@ -490,14 +502,14 @@ update (RMsg (R.TCPError infohash ci)) model =
 
 update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
     where
-        (infohash, ci) = details m
+        (infohash, ci, mnow) = details m
 
         dls = metadls model
 
         mdl = Map.lookup infohash dls
 
         (newdls, cmds) = case mdl of
-            Just (MetaDownloadsData { sharedModel, ongoing, idx_ }) ->
+            Just (MetaDownloadsData { sharedModel, ongoing, lastActivity, idx_ }) ->
                 let
                     (newmodel, cmds1) = case Map.lookup ci ongoing of
                         Just rmodel2 -> updateRModel sharedModel rmodel2
@@ -519,7 +531,12 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
                         True -> Map.delete infohash dls
                         False -> Map.insert
                             infohash
-                            (MetaDownloadsData newSharedMdl next idx_)
+                            ( MetaDownloadsData
+                                newSharedMdl
+                                next
+                                (maybe lastActivity id mnow)
+                                idx_
+                            )
                             dls
 
                 in
@@ -546,12 +563,12 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
                 _ -> R.update m rmodel
 
 
-        details :: R.Msg -> (InfoHash, CompactInfo)
-        details (R.DownloadInfo _ i c) = (i, c)
-        details (R.GotHandshake i c _) = (i, c)
-        details (R.Got _ _ i c _) = (i, c)
+        details :: R.Msg -> (InfoHash, CompactInfo, Maybe POSIXTime)
+        details (R.DownloadInfo _ i c) = (i, c, Nothing)
+        details (R.GotHandshake i c _) = (i, c, Nothing)
+        details (R.Got t _ i c _) = (i, c, Just t)
         details (R.Have _ _ _) = undefined
-        details (R.TCPError i c) = (i, c)
+        details (R.TCPError i c) = (i, c, Nothing)
 
         mergeDls :: R.Model -> R.Model -> R.Model
         mergeDls (R.Downloading _ _ lastBlk blks) (R.Downloading sz msgid _ _)

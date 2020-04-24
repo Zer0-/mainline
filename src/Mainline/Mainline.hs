@@ -109,7 +109,7 @@ data Msg
         }
     | TimeoutTransactions POSIXTime
     | MaintainPeers POSIXTime
-    | PeersFoundResult Int NodeID InfoHash [CompactInfo]
+    | PeersFoundResult POSIXTime Int NodeID InfoHash [CompactInfo]
     | NodeAdded CompactInfo
     | UDPError
 
@@ -536,7 +536,7 @@ update (SendMessage {})      (Uninitialized _)     = undefined
 update (SendMessage {})      (Uninitialized1 _ _)  = undefined
 update (SendResponse {})     (Uninitialized _)     = undefined
 update (SendResponse {})     (Uninitialized1 _ _)  = undefined
-update (PeersFoundResult _ _ _ _) _                = undefined
+update (PeersFoundResult _ _ _ _ _) _              = undefined
 update UDPError              _                     = undefined
 
 {-
@@ -782,11 +782,11 @@ handleResponse
 handleResponse
     _
     (TransactionState _ (GettingPeers infohash) _)
-    _
+    now
     (PeersFound _ peers)
     state
         | Map.member infohash (gettingPeers state) =
-            (state, Cmd.bounce (PeersFoundResult idx ourid infohash peers))
+            (state, Cmd.bounce (PeersFoundResult now idx ourid infohash peers))
         | otherwise = (state, Cmd.none)
 
         where

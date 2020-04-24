@@ -64,7 +64,7 @@ subscriptions (Model { model = m, count = n })
         getPort (M.Uninitialized _) = undefined
 
 update :: M.Msg -> Model -> (Model, M.Cmd M.Msg)
-update (M.PeersFoundResult _ _ _ _) m = (m, Cmd.none)
+update (M.PeersFoundResult _ _ _ _ _) m = (m, Cmd.none)
 update (M.NodeAdded ci) m = (m { count = (count m) + 1 }, cmd)
     where
         cmd = Cmd.writeChan (writeQ m) ci
