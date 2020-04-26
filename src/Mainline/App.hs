@@ -7,13 +7,15 @@ import Prelude hiding (init, lookup)
 import Data.Maybe (isJust, fromJust)
 import Data.Int (Int64)
 import qualified Data.Map as Map
-import Data.Array (Array, listArray, (!), (//), assocs)
-import Data.List (foldl')
+import Data.Array (Array, listArray, (!), (//), assocs, bounds, elems)
+import Data.List (foldl', sort)
 import Data.Foldable (toList)
 import Data.Cache.LRU (LRU, newLRU, lookup, insert)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Hashable (hashWithSalt, hash)
 import Data.ByteString (ByteString)
+import System.Random (mkStdGen, genRange, next)
+import Data.Ratio (numerator, denominator)
 
 import Data.Torrent
     ( InfoDict (..)
@@ -55,12 +57,15 @@ import Debug.Trace (trace)
 metaDlTimeout :: Int
 metaDlTimeout = 60
 
+percentToReset :: Int
+percentToReset = 10
+
 data Model = Model
     { models    :: Array Int M.Model
     , modelMap  :: BPT.Trie Int
     , tcache    :: LRU Int POSIXTime
     , haves     :: LRU InfoHash (POSIXTime, Int) -- (last cleared/first detected, counter)
-    , queue     :: [(Int, Int, M.Msg)] -- WARN: unbounded
+    , queue     :: [(Int, Int, Msg)] -- WARN: unbounded
     , metadls   :: Map.Map InfoHash MetaDownloadsData
     , servePort :: Port
     , msBetweenCallsToNode :: Int
@@ -75,7 +80,7 @@ data MetaDownloadsData = MetaDownloadsData
     }
 
 data MMsg
-    = MMsg M.Msg
+    = MMsg Msg
     | RMsg R.Msg
     | ProcessQueue POSIXTime
     | TimeoutTimedOuts POSIXTime
@@ -124,10 +129,10 @@ subscriptions mm = Sub.batch $
     , Sub.udp
         (servePort mm)
         (\ci r -> MMsg $ M.parseReceivedBytes ci r)
-        (MMsg M.UDPError)
+        (MMsg UDPError)
     , Sub.timer 1000 ProcessQueue
     , Sub.timer (60 * 1000) (\t -> TimeoutTimedOuts t)
-    , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ M.MaintainPeers t)
+    , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ MaintainPeers t)
     ]
 
     where
@@ -351,7 +356,47 @@ update (TimeoutTimedOuts now) m =
         ff metadl = now - (lastActivity metadl) > fromIntegral metaDlTimeout
 
 update (MMsg (MaintainPeers now)) m =
-    fanOutMsg (MaintainPeers now) m
+    (m { models = models2 } , Cmd.up MMsg $ Cmd.batch cmds)
+
+    where
+        t = toRational now
+
+        seed :: Int
+        seed = fromInteger $
+            numerator t * denominator t `mod` fromIntegral (maxBound :: Int)
+
+        gen = mkStdGen seed
+
+        len :: Int
+        len = (snd (bounds (models m))) + 1
+
+        rMin = let r = genRange gen in
+            if snd r < len - 1 then error "RNG" else fst r
+
+        genN _ 0 = []
+        genN g n = (\(i, g2) -> (i - rMin) `mod` len : genN g2 (n - 1)) (next g)
+
+        (_, newmodels, cmds) =
+            foldl'
+                foldfn
+                (resetIdxs, [], [])
+                (zip [0..len-1] (elems $ models m))
+
+        foldfn (rxs, mdls, cmds_) (i, model) =
+            let (msg, rxs2) = case rxs of
+                    (ri:xs) ->
+                        if i == ri then (Reset, xs)
+                        else (MaintainPeers now, rxs)
+                    [] -> (MaintainPeers now, rxs)
+            in
+                let (mdl, cmd) = M.update msg model
+                in
+                    (rxs2, mdls ++ [mdl], cmd : cmds_)
+
+        models2 = listArray (0, len - 1) newmodels
+
+        resetIdxs :: [ Int ]
+        resetIdxs = sort $ genN gen ((len `div` 100) * percentToReset)
 
 update (MMsg (PeersFoundResult now idx nodeid infohash peers)) model
     | Map.member infohash dls =
@@ -416,6 +461,7 @@ update (MMsg UDPError) model = (model, Cmd.log Cmd.WARNING ["UDPError"])
 update (MMsg (NodeAdded _)) model = (model, Cmd.none)
 
 update (MMsg (TimeoutTransactions _)) _ = undefined
+update (MMsg Reset) _ = undefined
 
 update (RMsg (R.Have now infohash infodict)) model =
     ( model
@@ -493,9 +539,9 @@ update (RMsg (R.TCPError infohash ci)) model =
         newdls =
             Map.update
                 ( \dls ->
-                    let next = Map.delete ci (ongoing dls) in
-                    if Map.null next then Nothing
-                    else Just (dls { ongoing = next })
+                    let nextOngoing = Map.delete ci (ongoing dls) in
+                    if Map.null nextOngoing then Nothing
+                    else Just (dls { ongoing = nextOngoing })
                 )
                 infohash
                 (metadls model)
@@ -519,7 +565,7 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
                                 [ "CompactInfo for RMsg not in our state." ]
                             )
 
-                    next = case newmodel of
+                    nextOngoing = case newmodel of
                         R.Off -> Map.delete ci ongoing
                         _ -> Map.insert ci newmodel ongoing
 
@@ -527,13 +573,13 @@ update (RMsg m) model = (model { metadls = newdls }, Cmd.up RMsg cmds)
                         R.Downloading {} -> newmodel
                         _ -> sharedModel
 
-                    newdls1 = case Map.null next of
+                    newdls1 = case Map.null nextOngoing of
                         True -> Map.delete infohash dls
                         False -> Map.insert
                             infohash
                             ( MetaDownloadsData
                                 newSharedMdl
-                                next
+                                nextOngoing
                                 (maybe lastActivity id mnow)
                                 idx_
                             )
@@ -618,6 +664,21 @@ updateExplicit msg model ix =
         m = models model
         (mm, cmds) = M.update msg (m ! ix)
 
+
+{-
+applyUpdate :: (M.Model -> M.Msg) -> Model -> (Model, Cmd MMsg)
+applyUpdate mkMsg m = (m { models = models2 }, cmds)
+    where
+        modelCmds = fmap f (models m)
+        f mmodel = M.update (mkMsg mmodel) mmodel
+
+        models2 = fmap fst modelCmds
+        cmds = Cmd.batch $ toList $ fmap ((Cmd.up MMsg) . snd) modelCmds
+
+
+fanOutMsg :: M.Msg -> Model -> (Model, Cmd MMsg)
+fanOutMsg msg m = applyUpdate (const msg) m
+-}
 
 fanOutMsg :: M.Msg -> Model -> (Model, Cmd MMsg)
 fanOutMsg msg m = (m { models = models2 }, cmds)

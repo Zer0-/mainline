@@ -8,7 +8,6 @@ module Mainline.RoutingTable
     , exists
     , willAdd
     , nclosest
-    , changeNode
     , questionable
     , remove
     , updateTime
@@ -66,10 +65,6 @@ uncheckedAdd (RoutingTable { bucket, nodes }) node =
 
     where
         nodeid = nodeId $ info node
-
-
-changeNode :: (Node -> Node) -> NodeID -> RoutingTable -> RoutingTable
-changeNode f k rt = rt { nodes = Map.adjust f k (nodes rt) }
 
 
 willAdd :: RoutingTable -> NodeInfo -> Bool

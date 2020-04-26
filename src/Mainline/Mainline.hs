@@ -27,7 +27,7 @@ import qualified Data.Set             as Set
 import Data.Set                      (fromAscList, filter, Set)
 import Data.BEncode                  (encode, decode)
 import Data.Time.Clock.POSIX         (POSIXTime)
-import Data.Array                    (Array, (!), indices)
+import Data.Array                    (Array, (!), indices, listArray)
 
 --import Architecture.TEA              (Config (..), run)
 --import Architecture.Cmd              (Cmd)
@@ -109,6 +109,7 @@ data Msg
         }
     | TimeoutTransactions POSIXTime
     | MaintainPeers POSIXTime
+    | Reset
     | PeersFoundResult POSIXTime Int NodeID InfoHash [CompactInfo]
     | NodeAdded CompactInfo
     | UDPError
@@ -522,8 +523,21 @@ update (MaintainPeers now) (Ready state) =
 
         ourid = ourId $ conf $ state
 
+update Reset (Ready state) =
+    ( Uninitialized cfg
+    , Cmd.randomBytes 20 $ NewNodeId (index cfg)
+    )
+
+    where
+        cfg1 = conf state
+        cfg = cfg1 { seedNodes = listArray (0, 19) newseeds }
+
+        newseeds = map compactInfo $
+            nclosest (ourId cfg1) 20 (routingTable state) -- "random" subset
+
 update (TimeoutTransactions _) m = (m, Cmd.none)
 update (MaintainPeers _) m = (m, Cmd.none)
+update Reset m = (m, Cmd.none)
 update (NodeAdded _) m = (m, Cmd.none)
 
 
