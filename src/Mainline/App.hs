@@ -52,13 +52,11 @@ import qualified Mainline.SQL as SQL
 import qualified Mainline.Prepopulate as Prepopulate
 import qualified Mainline.Config as Conf
 
-import Debug.Trace (trace)
-
 metaDlTimeout :: Int
 metaDlTimeout = 60
 
 percentToReset :: Int
-percentToReset = 10
+percentToReset = 4
 
 data Model = Model
     { models    :: Array Int M.Model
@@ -132,7 +130,7 @@ subscriptions mm = Sub.batch $
         (MMsg UDPError)
     , Sub.timer 1000 ProcessQueue
     , Sub.timer (60 * 1000) (\t -> TimeoutTimedOuts t)
-    , Sub.timer (5 * 60 * 1000) (\t -> MMsg $ MaintainPeers t)
+    , Sub.timer (2 * 60 * 1000) (\t -> MMsg $ MaintainPeers t)
     ]
 
     where
@@ -336,8 +334,15 @@ update
 update (MMsg (SendResponse { idx, targetNode, body, tid })) m =
     updateExplicit (SendResponse idx targetNode body tid) m idx
 
-update (ProcessQueue now) m = foldl' f (m { queue = [] }, Cmd.none) (trace ("t Processing queue of length " ++ (show $ length (queue m))) (queue m))
+update (ProcessQueue now) m = foldl' f (m { queue = [] }, logmsg) q
     where
+        q = queue m
+
+        logmsg = case q of
+            [] -> Cmd.none
+            _ -> Cmd.log Cmd.INFO
+                    [ "Processing queue of length ", show $ length q ]
+
         f (model, cmds) (i, key, msg) =
             let
                 (model2, cmds2) = sendOrQueue
@@ -665,21 +670,6 @@ updateExplicit msg model ix =
         (mm, cmds) = M.update msg (m ! ix)
 
 
-{-
-applyUpdate :: (M.Model -> M.Msg) -> Model -> (Model, Cmd MMsg)
-applyUpdate mkMsg m = (m { models = models2 }, cmds)
-    where
-        modelCmds = fmap f (models m)
-        f mmodel = M.update (mkMsg mmodel) mmodel
-
-        models2 = fmap fst modelCmds
-        cmds = Cmd.batch $ toList $ fmap ((Cmd.up MMsg) . snd) modelCmds
-
-
-fanOutMsg :: M.Msg -> Model -> (Model, Cmd MMsg)
-fanOutMsg msg m = applyUpdate (const msg) m
--}
-
 fanOutMsg :: M.Msg -> Model -> (Model, Cmd MMsg)
 fanOutMsg msg m = (m { models = models2 }, cmds)
     where
@@ -712,7 +702,7 @@ removeGettingPeers (M.Ready state) infohash =
     M.Ready $ state { M.gettingPeers = newGettingPeers }
     where
         newGettingPeers = Map.delete infohash (M.gettingPeers state)
-removeGettingPeers _ _ = undefined
+removeGettingPeers state _ = state
 
 
 calculateScore :: Int -> POSIXTime -> Double

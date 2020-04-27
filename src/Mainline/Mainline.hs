@@ -530,28 +530,27 @@ update Reset (Ready state) =
 
     where
         cfg1 = conf state
-        cfg = cfg1 { seedNodes = listArray (0, 19) newseeds }
+        cfg = cfg1 {
+            seedNodes =
+                if length newseeds < 20 then seedNodes cfg1
+                else listArray (0, length newseeds - 1) newseeds
+        }
 
         newseeds = map compactInfo $
             nclosest (ourId cfg1) 20 (routingTable state) -- "random" subset
 
 update (TimeoutTransactions _) m = (m, Cmd.none)
-update (MaintainPeers _) m = (m, Cmd.none)
-update Reset m = (m, Cmd.none)
-update (NodeAdded _) m = (m, Cmd.none)
-
+update (MaintainPeers _)       m = (m, Cmd.none)
+update Reset                   m = (m, Cmd.none)
+update (NodeAdded _)           m = (m, Cmd.none)
+update (NewNodeId _ _)         m = (m, Cmd.none)
+update (SendFirstMessage {})   m = (m, Cmd.none)
+update (SendMessage {})        m = (m, Cmd.none)
+update (SendResponse {})       m = (m, Cmd.none)
 
 -- Explicitly list undefined states
-update (NewNodeId _ _)       (Uninitialized1 _ _)  = undefined
-update (NewNodeId _ _)       (Ready _)             = undefined
-update (SendFirstMessage {}) (Uninitialized1 _ _ ) = undefined
-update (SendFirstMessage {}) (Ready _)             = undefined
-update (SendMessage {})      (Uninitialized _)     = undefined
-update (SendMessage {})      (Uninitialized1 _ _)  = undefined
-update (SendResponse {})     (Uninitialized _)     = undefined
-update (SendResponse {})     (Uninitialized1 _ _)  = undefined
-update (PeersFoundResult _ _ _ _ _) _              = undefined
-update UDPError              _                     = undefined
+update (PeersFoundResult _ _ _ _ _) _ = undefined
+update UDPError              _        = undefined
 
 {-
 subscriptions :: Model -> Sub Msg
