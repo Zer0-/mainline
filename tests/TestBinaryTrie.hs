@@ -3,9 +3,12 @@ module TestBinaryTrie
     , deletedNotInTrie
     , closestReturnsSomething
     , closestIsXorClosest
+    , nclosestReturnsSomething
+    , nclosestIsXorClosest
     ) where
 
 import Prelude hiding (lookup)
+import qualified Data.Set as Set
 import Data.Maybe (isJust, isNothing, fromJust)
 import Data.List (sortBy)
 import Mainline.RoutingTable (orderingf)
@@ -14,6 +17,7 @@ import Data.BinaryTrie
     , lookup
     , delete
     , closest
+    , nclosest
     , Trie
     )
 
@@ -67,4 +71,34 @@ closestIsXorClosest ints k = null ints ||
         positiveInts = map abs ints
         items = map (\x -> (x, x)) positiveInts
         trie = fromList items
+        key = abs k
+
+nclosestReturnsSomething
+    :: [(Integer, String)]
+    -> Integer
+    -> Int
+    -> Bool
+nclosestReturnsSomething items_ k n_ =
+    null items_ || length (nclosest n trie key) == min len n
+
+    where
+        n = abs n_
+        items = map (\(i, v) -> (abs i, v)) items_
+        trie = fromList items
+        key = abs k
+        len = Set.size $ Set.fromList (map (abs . fst) items)
+
+
+nclosestIsXorClosest
+    :: [Integer]
+    -> Integer
+    -> Int
+    -> Bool
+nclosestIsXorClosest items_ k n_
+    = nclosest n trie key == (take n $ sortBy (orderingf key) items)
+
+    where
+        n = abs n_
+        items = Set.toList $ Set.fromList $ map abs items_
+        trie = fromList $ map (\x -> (x, x)) items
         key = abs k

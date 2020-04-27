@@ -8,16 +8,19 @@ module Data.BinaryTrie
     ( lookup
     , empty
     , closest
+    , nclosest
+    , modify
     , delete
     , insert
     , fromList
+    , elems
     , Trie
     ) where
 
 
 import Data.Bits((.&.), (.|.), xor, complement)
 
-import Prelude hiding (lookup)
+import Prelude hiding (lookup, foldr)
 import Data.Foldable (foldl')
 
 data Trie a
@@ -47,12 +50,31 @@ closest (Branch _ m a b) k =
     if zeroBit k m then closest a k else closest b k
 
 
+nclosest :: Int -> Trie a -> Integer -> [a]
+nclosest n t k = (fst $ nclosest_ n t k) []
+
+nclosest_ :: Int -> Trie a -> Integer -> ([a] -> [a], Int)
+nclosest_ 0 _ _ = (id, 0)
+nclosest_ _ Empty _ = (id, 0)
+nclosest_ _ (Leaf _ x) _ = ((x :), 1)
+nclosest_ c (Branch _ m a b) k = (as . bs, d + e)
+    where
+        (a_, b_) = if zeroBit k m then (a, b) else (b, a)
+        (as, d) = nclosest_ c a_ k
+        (bs, e) = nclosest_ (c - d) b_ k
+
+modify :: (a -> Maybe a) -> Trie a -> Integer -> Trie a
+modify _ Empty _ = Empty
+modify f (Leaf j x) k =
+    if j == k
+    then (maybe Empty (Leaf j) (f x))
+    else Leaf j x
+modify f (Branch p m a b) k = if zeroBit k m
+    then br p m (modify f a k) b
+    else br p m a (modify f b k)
+
 delete :: Trie a -> Integer -> Trie a
-delete Empty _ = Empty
-delete (Leaf j x) k = if j == k then Empty else Leaf j x
-delete (Branch p m a b) k = if zeroBit k m
-    then br p m (delete a k) b
-    else br p m a (delete b k)
+delete = modify (const Nothing)
 
 zeroBit :: Integer -> Integer -> Bool
 zeroBit k m = (k .&. m) == 0
@@ -79,7 +101,7 @@ join p0 m0 t0 p1 m1 t1 = if zeroBit p0 m
         m = branchingBit p0 m0 p1 m1
         p3 = mask p0 m
 
-insert :: Show a => Integer -> a -> Trie a -> Trie a
+insert :: Integer -> a -> Trie a -> Trie a
 insert k x t = ins t
     where
         ins Empty = Leaf k x
@@ -117,5 +139,13 @@ highestBit x m = highb x_
             in if y == n then n else highb $! (y - n)
 
 
-fromList :: (Foldable t, Show a) => t (Integer, a) -> Trie a
+fromList :: Foldable t => t (Integer, a) -> Trie a
 fromList = foldl' (flip (uncurry insert)) Empty
+
+foldr :: (a -> b -> b) -> b -> Trie a -> b
+foldr _ c Empty = c
+foldr f c (Leaf _ x) = f x c
+foldr f c (Branch _ _ a b) = foldr f (foldr f c b) a
+
+elems :: Trie a -> [a]
+elems = foldr (:) []

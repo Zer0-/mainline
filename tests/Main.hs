@@ -34,6 +34,8 @@ import TestBinaryTrie
     , deletedNotInTrie
     , closestReturnsSomething
     , closestIsXorClosest
+    , nclosestReturnsSomething
+    , nclosestIsXorClosest
     )
 
 --import Debug.Trace
@@ -401,6 +403,8 @@ tests =
         , testProperty "delete works" deletedNotInTrie
         , testProperty "closest always returns value" closestReturnsSomething
         , testProperty "closest value is xor distance closest" closestIsXorClosest
+        , testProperty "nclosest always returns values" nclosestReturnsSomething
+        , testProperty "nclosest matches xor distance sort" nclosestIsXorClosest
         ]
     ]
 

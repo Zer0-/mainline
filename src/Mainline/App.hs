@@ -391,9 +391,9 @@ update (MMsg (MaintainPeers now)) m =
             in
                 let (mdl, cmd) = M.update msg model
                 in
-                    (rxs2, mdls ++ [mdl], cmd : cmds_)
+                    (rxs2, mdl : mdls, cmd : cmds_)
 
-        models2 = listArray (0, len - 1) newmodels
+        models2 = listArray (0, len - 1) (reverse newmodels)
 
         resetIdxs :: [ Int ]
         resetIdxs = sort $ genN gen ((len `div` 100) * percentToReset)

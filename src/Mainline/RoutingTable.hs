@@ -14,13 +14,12 @@ module Mainline.RoutingTable
     , orderingf
     ) where
 
-import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Data.List (sortBy)
 import Data.Bits (xor)
-import Data.Function (on)
 import Data.Time.Clock.POSIX (POSIXTime)
+import Data.Maybe (isJust)
 
+import qualified Data.BinaryTrie as BPT
 import Mainline.Bucket
     ( Bucket (Bucket)
     , insert
@@ -52,7 +51,7 @@ data Node = Node
 --      diversity in our routing table.
 data RoutingTable = RoutingTable
     { bucket :: Bucket NodeID
-    , nodes :: Map.Map NodeID Node
+    , nodes :: BPT.Trie Node
     }
 
 
@@ -60,7 +59,7 @@ uncheckedAdd :: RoutingTable -> Node -> RoutingTable
 uncheckedAdd (RoutingTable { bucket, nodes }) node =
     RoutingTable
         { bucket = insert nodeid bucket
-        , nodes = Map.insert nodeid node nodes
+        , nodes = BPT.insert nodeid node nodes
         }
 
     where
@@ -74,11 +73,11 @@ willAdd rt nodeinfo = nid /= (getOwnId rt) && willInsert nid (bucket rt)
 
 
 exists :: RoutingTable -> NodeInfo -> Bool
-exists rt nodeinfo = Map.member (nodeId nodeinfo) (nodes rt)
+exists rt nodeinfo = isJust $ BPT.lookup (nodes rt) (nodeId nodeinfo)
 
 
 initRoutingTable :: Int -> NodeID -> RoutingTable
-initRoutingTable bucketsize nodeid = RoutingTable bucket Map.empty
+initRoutingTable bucketsize nodeid = RoutingTable bucket BPT.empty
     where
         bucket = Bucket nodeid bucketsize 0 (((^) :: Integer -> Integer -> Integer) 2 160) Set.empty
 
@@ -88,11 +87,7 @@ getOwnId = getId . bucket
 
 
 nclosest :: NodeID -> Int -> RoutingTable -> [NodeInfo]
-nclosest nid n rt = map info $ take n $ sortBy f $ Map.elems $ nodes rt
-    where
-        f = (orderingf nid) `on` getid
-
-        getid = (nodeId . info)
+nclosest nid n rt = map info $ BPT.nclosest n (nodes rt) nid
 
 
 orderingf :: Integer -> Integer -> Integer -> Ordering
@@ -105,7 +100,7 @@ orderingf target = f
 
 
 questionable :: RoutingTable -> POSIXTime -> [ Node ]
-questionable rt now = filter f $ Map.elems $ nodes rt
+questionable rt now = filter f $ BPT.elems $ nodes rt
     where
         f :: Node -> Bool
         f n = lastMsgTime n < now - (fromIntegral minQDurationSeconds)
@@ -113,9 +108,14 @@ questionable rt now = filter f $ Map.elems $ nodes rt
 
 remove :: RoutingTable -> NodeID -> RoutingTable
 remove RoutingTable { bucket, nodes } nid =
-    RoutingTable (delete nid bucket) (Map.delete nid nodes)
+    RoutingTable (delete nid bucket) (BPT.delete nodes nid)
 
 
 updateTime :: RoutingTable -> NodeID -> POSIXTime -> RoutingTable
-updateTime rt nid now =
-    rt { nodes = Map.adjust (\n -> n { lastMsgTime = now }) nid (nodes rt) }
+updateTime rt nid now = rt
+    { nodes =
+        BPT.modify
+            (\n -> Just $ n { lastMsgTime = now })
+            (nodes rt)
+            nid
+    }
