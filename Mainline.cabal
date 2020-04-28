@@ -75,7 +75,9 @@ executable Mainline
                    bittorrent,
                    safe-exceptions,
                    unagi-chan,
-                   aeson
+                   aeson,
+                   postgresql-libpq,
+                   file-embed
   other-modules:
                    Architecture.Cmd
                    Architecture.Internal.Cmd
@@ -99,8 +101,8 @@ executable Mainline
                    Network.Octets
                    Data.BinaryTrie
   hs-source-dirs:  src
-  ghc-options:     -Wall -rtsopts -threaded -O2 -fllvm -prof -fprof-auto
-  -- -dynamic
+  ghc-options:     -Wall -rtsopts -threaded -O2 -fllvm -dynamic
+  -- -prof -fprof-auto
   default-language: Haskell2010
   main-is:         Mainline/ConcurrentApp.hs
 
