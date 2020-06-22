@@ -38,6 +38,8 @@ import TestBinaryTrie
     , nclosestIsXorClosest
     )
 
+import Mainline.Score (calculateScore)
+
 --import Debug.Trace
 
 bucketsize :: Bucket a -> Int
@@ -370,6 +372,19 @@ fmt_decodeAnnoucePeerQuery
                 else
                     empty
 
+
+inverseScore :: Double -> Integer
+inverseScore score = round $ ((log (score + 1)) / (log maxDbl / endt) + t0)
+    where
+        maxDbl = 10 ** 300
+        t0 = 1572391617
+        endt = t0 + (1.577 * 10**10)
+
+invertScore :: Integer -> Bool
+invertScore i = inverseScore (calculateScore 1 (fromInteger t)) == t
+    where
+        t = abs(i) + 1572391617
+
 tests :: [Test]
 tests =
     [ testGroup "QuickCheck Bucket"
@@ -406,6 +421,8 @@ tests =
         , testProperty "nclosest always returns values" nclosestReturnsSomething
         , testProperty "nclosest matches xor distance sort" nclosestIsXorClosest
         ]
+    , testGroup "Other"
+        [ testProperty "inverse score function is correct" invertScore ]
     ]
 
 main :: IO ()

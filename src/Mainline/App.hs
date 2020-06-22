@@ -47,6 +47,7 @@ import Network.KRPC.Types
 import Network.KRPC.Helpers (hexify)
 import Network.Octets (octToByteString, fromByteString)
 import Mainline.RoutingTable (nclosest)
+import Mainline.Score (calculateScore)
 import qualified Mainline.ResolveMagnet as R
 import qualified Mainline.SQL as SQL
 import qualified Mainline.Prepopulate as Prepopulate
@@ -703,16 +704,6 @@ removeGettingPeers (M.Ready state) infohash =
     where
         newGettingPeers = Map.delete infohash (M.gettingPeers state)
 removeGettingPeers state _ = state
-
-
-calculateScore :: Int -> POSIXTime -> Double
-calculateScore n t = (e ** ((log maxDbl / endt) * (x - t0)) - 1) * (fromIntegral n)
-    where
-        maxDbl = 10 ** 300
-        t0 = 1572391617
-        endt = t0 + (1.577 * 10**10)
-        x = realToFrac t
-        e = exp 1
 
 throttle
     :: (Ord a)

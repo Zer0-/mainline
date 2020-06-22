@@ -42,6 +42,7 @@ test-suite Main
                    Network.Octets
                    Mainline.Bucket
                    Mainline.RoutingTable
+                   Mainline.Score
                    Data.BinaryTrie
                    TestBinaryTrie
   ghc-options:     -Wall -rtsopts
@@ -94,6 +95,7 @@ executable Mainline
                    Mainline.Prepopulate
                    Mainline.App
                    Mainline.Config
+                   Mainline.Score
                    Network.KRPC
                    Network.KRPC.Helpers
                    Network.KRPC.InternalConstants
