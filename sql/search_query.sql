@@ -1,12 +1,11 @@
 --EXPLAIN ANALYZE
 SELECT
-    name,
+    replace(name, '|', '\|') AS name,
     pg_size_pretty(sum(file_info.size_bytes)) AS total_size,
     count(file_info.*) AS filecount,
     score,
     added,
     concat('magnet:?xt=urn:btih:', info_hash) as magnet,
-    t.info_id,
     sort_rank
 FROM (
     SELECT

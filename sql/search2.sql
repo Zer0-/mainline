@@ -1,6 +1,8 @@
 SELECT * FROM (
     SELECT
         parseText(name) AS name,
+        pg_size_pretty(total_size) as total_size,
+        filecount,
         score,
         concat('magnet:?xt=urn:btih:', info_hash),
         added,
