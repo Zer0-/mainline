@@ -64,30 +64,45 @@ DROP AGGREGATE IF EXISTS tsvector_agg(tsvector);
 --DROP INDEX IF EXISTS search_index_idx;
 --CREATE INDEX search_index_idx ON meta_info USING GIN (search_index);
 
-COMMIT;
-
-BEGIN TRANSACTION;
-
 -- Populate filecount, total_size columns
 
+/*
+EXPLAIN ANALYZE
+SELECT
+    info_id,
+    count(subquery.info_id) AS filecount,
+    sum(subquery.size_bytes) AS total_size
+FROM (
+    SELECT
+        meta_info.info_id AS info_id,
+        file_info.size_bytes AS size_bytes
+    FROM
+        meta_info NATURAL JOIN file_info
+    WHERE
+        meta_info.filecount IS NULL
+) AS subquery
+GROUP BY subquery.info_id;
+*/
+
+WITH
+nullinfos AS (
+    SELECT info_id FROM meta_info
+    WHERE meta_info.filecount IS NULL
+),
+subquery AS (
+    SELECT
+        file_info.info_id,
+        count(file_info.info_id) AS filecount,
+        sum(file_info.size_bytes) AS total_size
+    FROM file_info
+    WHERE file_info.info_id IN (SELECT info_id FROM nullinfos)
+    GROUP BY file_info.info_id
+)
 UPDATE meta_info
 SET
     filecount = subquery.filecount,
     total_size = subquery.total_size
-FROM (
-    SELECT
-        t.info_id,
-        count(file_info.info_id) AS filecount,
-        sum(file_info.size_bytes) AS total_size
-    FROM (
-        SELECT
-            info_id
-        FROM meta_info
-        WHERE filecount IS NULL OR total_size IS NULL
-        LIMIT 10000
-    ) as t JOIN file_info ON t.info_id = file_info.info_id
-    GROUP BY t.info_id
-) as subquery
+FROM subquery
 WHERE meta_info.info_id = subquery.info_id;
 
 COMMIT;
@@ -99,5 +114,6 @@ COMMIT;
 
 -- DROP INDEX IF EXISTS file_info_idx;
 -- CREATE INDEX file_info_idx ON file_info (info_id);
+-- CREATE INDEX ON meta_info (filecount) WHERE filecount IS NULL;
 
 -- COMMIT;
