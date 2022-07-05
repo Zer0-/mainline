@@ -5,3 +5,14 @@ Move Mainline to Network.Mainline?
 Mainline/Scripts/SendUDPHello.hs to a common Runnables directory with App?
 Then we have Network.{Mainline, KRPC, Bittorrent}
 - but we still have all of the actual network calls under Architecture
+
+
+OS Network Related Commands
+---------------------------
+
+#set ulimit (maximum open files count)
+ulimit -Sn 9999
+
+#set network memory buffer size
+sysctl -w net.core.rmem_max=8388608
+sysctl -w net.core.rmem_default=8388608
